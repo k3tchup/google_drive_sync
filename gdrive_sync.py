@@ -37,7 +37,24 @@ MEDIA_EXPORT_MATRIX = {
                     "extension": ".xslx"
             }
 }
-ROOT_FOLDER_ID = "0AEEAW1iiehm3Uk9PVA" # temporarily hard coded to make this easier to figure out.  remove later
+ROOT_FOLDER_ID = ""
+ROOT_FOLDER_OBJECT = None
+
+# get the root folder
+def getRootFolder(service) -> gFolder:
+    logging.debug("fetching the root folder")
+    rootFolder = None
+    try:
+        gServiceFiles = service.files()
+        params = { "fileId": 'root'
+        }       
+        request = gServiceFiles.get(**params)
+        rootFolderResult =request.execute()
+        rootFolder = gFolder(rootFolderResult)
+    except HttpError as err:
+        logging.error("error fetching the root folder." + str(err))
+        print(err)
+    return rootFolder
 
 # clear the local folder cache
 def clearFolderCache(folder_path: str) -> bool:
@@ -206,15 +223,23 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
     try:
         # get the root folder
         gServiceFiles = service.files()
-        request = gServiceFiles.get(fileId = 'root')
-        rootFolder = request.execute()
-        print(rootFolder)
+        if not ROOT_FOLDER_OBJECT:
+            request = gServiceFiles.get(fileId = 'root')
+            rootFolder = request.execute()
+
+        else:
+            rootFolder = ROOT_FOLDER_OBJECT.properties
+        
         fRootFolder = open(FOLDERS_CACHE_PATH + "_root", "w+")
         fRootFolder.write(json.dumps(rootFolder, indent = 4))
         fRootFolder.close()
-        ROOT_FOLDER_ID = rootFolder['id']
+        
+        global ROOT_FOLDER_ID
+        if ROOT_FOLDER_ID == '':
+            ROOT_FOLDER_ID = rootFolder['id']
+    
 
-        print('List files')
+        #print('List files')
         
         pageToken = None
         params = { "q": "mimeType='application/vnd.google-apps.folder'",
@@ -264,10 +289,6 @@ def main():
         print(str(err))
         raise Exception("unable to initialize logging")
 
-    
-    
-    logging.info("clearning the local folder cache")
-    clearFolderCache(FOLDERS_CACHE_PATH)
     logging.info("initializing application credentials")
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
@@ -299,8 +320,18 @@ def main():
         except HttpError as err:
             print(err)
 
-    #try:
     service = build('drive', 'v3', credentials=creds)
+
+    logging.debug("Fetching the root folder from Google drive.")    
+    rootFolder = getRootFolder(service)
+    global ROOT_FOLDER_ID 
+    ROOT_FOLDER_ID = rootFolder.id
+    global ROOT_FOLDER_OBJECT 
+    ROOT_FOLDER_OBJECT = rootFolder
+
+    logging.info("clearning the local folder cache")
+    clearFolderCache(FOLDERS_CACHE_PATH)
+
     # fetch all the folders and structure from google drive
     writeFolderCache(service)
     # read the local cache and create linked folder tree objects
