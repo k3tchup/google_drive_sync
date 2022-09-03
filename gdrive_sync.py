@@ -4,6 +4,7 @@ import json
 import io
 import logging
 import os.path
+import concurrent.futures
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -171,6 +172,7 @@ def downloadFile(service, file: gFile, targetPath:str)-> bool:
         fileData = io.BytesIO()
         downloader = MediaIoBaseDownload(fileData, request)
         done = False
+        print("downloading file %s." % targetPath)
         while done is False:
             status, done = downloader.next_chunk()
             print(F'Download {int(status.progress() * 100)}.')
@@ -179,7 +181,7 @@ def downloadFile(service, file: gFile, targetPath:str)-> bool:
             f.write(fileData.getbuffer())
 
     except HttpError as err:
-        logging.error("error downloading file. %s", str(err))
+        logging.error("error downloading file. %s" % str(err))
         print(err)
         bSuccess = False
     return bSuccess
@@ -219,7 +221,7 @@ def exportNativeFile(service, file: gFile, targetPath: str)-> bool:
     return bSuccess
 
 def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
-    logging.debug("writing local folder cache to %s.", str(localCachePath))
+    logging.debug("writing local folder cache to %s." % str(localCachePath))
     try:
         # get the root folder
         gServiceFiles = service.files()
@@ -339,7 +341,9 @@ def main():
     rootFolder = (list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders)))[0]
     #printFolderTree(folders)
     copyFolderTree(rootFolder, '/home/ketchup/gdrive')
+
     files = listFileInDirectory(service, rootFolder)
+    '''
     for f in files:
         print("Downloading file: " + f.name + "; mime type: " + f.properties['mimeType'])
         if "application/vnd.google-apps" in f.properties['mimeType']:
@@ -347,9 +351,31 @@ def main():
                 exportNativeFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
         else:
             downloadFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
+    '''
+
+    # max threads
+    maxThreads = os.cpu_count() - 1
+    logging.info("initializing %d threads", maxThreads)
 
 
+    with concurrent.futures.ThreadPoolExecutor(max_workers=maxThreads) as executor:
+        futures = []
+        for f in files:
+            if "application/vnd.google-apps" in f.properties['mimeType']:
+                if EXPORT_NATIVE_DOCS:
+                    futures.append(executor.submit(
+                        exportNativeFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
+                    ))
+            else:
+                futures.append(executor.submit(
+                        downloadFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
+                    ))
+            
+        #for future in concurrent.futures.as_completed(futures):
+        #    future.done
+            
 
+    service.close()
     logging.info("Finished sync.")
 
     

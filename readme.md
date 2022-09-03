@@ -22,7 +22,9 @@ https://www.googleapis.com/auth/activity
 
 [x] copy remove folder structure to local
 
-[x] download non native apps file
+[x] download non native apps files
+
+[ ] initial download of the entire drive
 
 [ ] write export function to export google apps content.  need to adjust the mime type for the correct content.  examples below
 ```
@@ -31,15 +33,23 @@ https://www.googleapis.com/auth/activity
 ```
 - still need to add more supported foramts. what are they?
 
-[ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere? 
+[ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  
 
-[ ] deal with downloads and uploads multi-threaded
+[ ] do we want a local sqlite db to keep track of all the file versions and metadata?
+
+[ ] multi-threading of uploads and downloads
 
 [ ] upload files
 
+[ ] resumable uploads (in case the connection fails)
+
+[ ] delete files locally
+
+[ ] delete files remotely
+
 [ ] version handling so we don't transfer files we don't need to.   there are version numbers in the metadata
 
-[ ] subscribe to change notifications
+[ ] subscribe to change notifications provided by Google drive
 
 [x] logging 
 - will need some improvement as we get going
