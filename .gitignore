@@ -1,0 +1,8 @@
+**/log
+**/folders
+*.pyc
+*.bu
+tokens.json
+credentials.json
+git_submit.sh
+
