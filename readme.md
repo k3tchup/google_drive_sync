@@ -20,6 +20,7 @@ https://www.googleapis.com/auth/activity
   * downloading individual files
   * full sync down to local from Google drive
   * export of native Google Apps files, like Docs and Sheets.
+* Sqlite database for metadata data storage 
 
 ## To-do (work in progress)
 
@@ -50,7 +51,9 @@ https://www.googleapis.com/auth/activity
 
 [ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  
 
-[ ] do we want a local sqlite db to keep track of all the file versions and metadata?
+[x] do we want a local sqlite db to keep track of all the file versions and metadata?
+- Will likely add additional tables, like for tracking files that errored out.
+- Will probably extend the gObjects table with local file versioning
 
 [x] multi-threading for downloads
 

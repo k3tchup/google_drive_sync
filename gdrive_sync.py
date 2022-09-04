@@ -53,6 +53,7 @@ MAX_THREADS = 1
 CREDENTIALS = None
 DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
 DATABASE = None
+CHANGES_TOKEN = None
 
 # Create a new Http() object for every request
 # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
@@ -335,7 +336,6 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
         print(err)
 
 # full sync down
-
 def doFullDownload(service, folder: gFolder, targetPath:str):
     logging.debug("starting full download from google drive to %s" % targetPath)
     try:
@@ -348,8 +348,49 @@ def doFullDownload(service, folder: gFolder, targetPath:str):
         logging.error("error writing local folder cache. %s" % str(err))
         print(str(err))
     
+# gets the change token for changes in the drive since last sync
+# https://developers.google.com/drive/api/guides/manage-changes
+def getDriveChangesToken(service):
+    logging.info("fetching the start changes token from Google Drive.")
+    startToken = None
+    try:
+        response = service.changes().getStartPageToken().execute()
+        startToken = response.get("startPageToken")
+    except HttpError as err:
+        logging.error("error getting changes start token. %s", str(err))
+        print(err)
+    except Exception as err:
+        logging.error("error getting changes start token. %s", str(err))
+        print(str(err))   
+    
+    return startToken
 
+# get changes since the last change token fetch
+# https://developers.google.com/drive/api/guides/manage-changes
+def getDriveChanges(service, changeToken):
+    changes = []
+    try:
+        while changeToken is not None:
+            response = service.changes().list(pageToken=changeToken,
+                                              spaces='drive').execute()
+            for change in response.get('changes'):
+                # Process change
+                changes.append(change)
+            if 'newStartPageToken' in response:
+                # Last page, save this token for the next polling interval
+                global CHANGES_TOKEN
+                CHANGES_TOKEN = response.get('newStartPageToken')
+            changeToken = response.get('nextPageToken')
+    except HttpError as err:
+        logging.error("error getting changes from Drive. %s", str(err))
+        print(err)
+    except Exception as err:
+        logging.error("error getting changes from Drive. %s", str(err))
+        print(str(err))   
 
+    return changes
+
+    
 
 def main():
 
@@ -428,8 +469,14 @@ def main():
     DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
     DATABASE.insert_gObject(folder=rootFolder)
 
+    # start tracking changes
+    global CHANGES_TOKEN
+    CHANGES_TOKEN = getDriveChangesToken(service)
+    changes = getDriveChanges(service, CHANGES_TOKEN)
+
+
     logging.info("clearing the local folder cache")
-    clearFolderCache(FOLDERS_CACHE_PATH)
+    #clearFolderCache(FOLDERS_CACHE_PATH)
 
     # fetch all the folders and structure from google drive
     writeFolderCache(service)
