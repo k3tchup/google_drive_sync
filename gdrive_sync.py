@@ -313,6 +313,8 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
                 with open(FOLDERS_CACHE_PATH + f['id'], 'w+') as folder_data:
                     folderObj = gFolder(f)
                     DATABASE.insert_gObject(folderObj)
+                    if 'parents' in folderObj.properties.keys():
+                        DATABASE.insert_parents(folderObj.id, folderObj.properties['parents'])
                     folder_data.write(json.dumps(f, indent=5))
                     folder_data.close()
         

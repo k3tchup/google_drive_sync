@@ -1,7 +1,7 @@
 import sqlite3
 from sqlite3 import Error
 import logging
-from typing import Optional
+from typing import List
 import json
 import sys
 import os
@@ -154,6 +154,31 @@ class sqlite_store:
         except Exception as e:
             logging.error("unable to insert folder %s into database. %s" % (file.name, str(e)))
 
+    def insert_parents(self, id:str, parents: List[str]):
+        try:
+            existing_parents = sorted(self.fetch_parents(id))
+            parents = sorted(parents)
+            if existing_parents == parents:
+                return
+            elif len(existing_parents) > 0:
+                self.update_parents(id, parents)
+            else:
+                #do the insert
+                for parent in parents:
+                    procInsertRelationships_sql = "INSERT INTO relationships \
+                                            (parent_id, child_id) VALUES ('" +\
+                                            parent + "', '" + \
+                                            id + "');"
+                    self.cursor.execute(procInsertRelationships_sql)
+                self.conn.commit()
+
+        except sqlite3.Error as e:
+            logging.error("Unable to insert parents for object id %s. %s" % (id, str(e)))
+        except Exception as e:
+            logging.error("Unable to insert parents for object id %s. %s" % (id, str(e))) 
+                
+
+
 
     def update_gObject(self, folder: gFolder):
         try:
@@ -170,6 +195,21 @@ class sqlite_store:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
         except Exception as e:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
+
+    
+    # this isn't right.  need to delete the existing data and re-insert since we are assuming the the update is authoritative
+    def update_parents(self, id:str, parents: List[str]):
+        try:
+            deleteParents_sql = "DELETE FROM relationships WHERE child_id = '" + id + "';"
+            self.cursor.execute(deleteParents_sql)
+            self.conn.commit()
+            
+            self.insert_parents(id, parents)
+        
+        except sqlite3.Error as e:
+            logging.error("Unable to update parents for object id %s. %s" % (id, str(e)))
+        except Exception as e:
+            logging.error("Unable to update parents for object id %s. %s" % (id, str(e))) 
 
 
     def open(self, dbPath: str):
