@@ -22,6 +22,7 @@ from googleapiclient import discovery
 
 # application imports
 from gDrive_data_structures.data_types import *
+from datastore.sqlite_store import *
 
 # global variables
 TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
@@ -50,6 +51,8 @@ ROOT_FOLDER_ID = ""
 ROOT_FOLDER_OBJECT = None
 MAX_THREADS = 1
 CREDENTIALS = None
+DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
+DATABASE = None
 
 # Create a new Http() object for every request
 # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
@@ -82,7 +85,7 @@ def clearFolderCache(folder_path: str) -> bool:
             os.remove(os.path.join(dir, f))
         return True
     except Exception as err:
-        logging.error("Failed to clear local cache." + str(err))
+        logging.error("Failed to clear local cache. %s" % str(err))
         return False
 
 # read the local folder metadata cache into memory
@@ -308,6 +311,8 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
             for f in fs:
                 #print(f)
                 with open(FOLDERS_CACHE_PATH + f['id'], 'w+') as folder_data:
+                    folderObj = gFolder(f)
+                    DATABASE.insert_gObject(folderObj)
                     folder_data.write(json.dumps(f, indent=5))
                     folder_data.close()
         
@@ -358,6 +363,12 @@ def main():
         print(str(err))
         raise Exception("unable to initialize logging")
 
+    logging.info("initialize local metadata store.")
+    global DATABASE
+    DATABASE = sqlite_store()
+    if not os.path.exists(DATABASE_PATH):
+        DATABASE.create_db(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
+
     logging.info("initializing application credentials")
     creds = None
     # The file token.json stores the user's access and refresh tokens, and is
@@ -403,6 +414,9 @@ def main():
     global ROOT_FOLDER_OBJECT 
     ROOT_FOLDER_OBJECT = rootFolder
 
+    DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
+    DATABASE.insert_gObject(rootFolder)
+
     logging.info("clearing the local folder cache")
     clearFolderCache(FOLDERS_CACHE_PATH)
 
@@ -426,6 +440,7 @@ def main():
     doFullDownload(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
 
     service.close()
+    DATABASE.close()
     logging.info("Finished sync.")
 
     

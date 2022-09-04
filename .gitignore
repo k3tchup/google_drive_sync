@@ -1,5 +1,6 @@
 **/log
 **/folders
+**/.metadata
 *.pyc
 *.bu
 tokens.json
