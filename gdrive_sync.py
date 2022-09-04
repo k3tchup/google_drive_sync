@@ -194,9 +194,13 @@ def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
                     credentials = Credentials.from_authorized_user_file(TOKEN_CACHE, TARGET_SCOPES)
                     authorized_http = google_auth_httplib2.AuthorizedHttp(credentials, http=httplib2.Http())
                     service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
+
+                    # build new database object for multi-threading too
+                    threadSafeDB = sqlite_store()
+                    threadSafeDB.open(DATABASE_PATH)
                     
                     futures.append(executor.submit(
-                            downloadFile, service, f, filePath
+                            downloadFile, service, f, filePath, threadSafeDB
                         ))
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -208,7 +212,7 @@ def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
     return bResult
 
 # download a single file (will be called multi-threaded)
-def downloadFile(service, file: gFile, targetPath:str):
+def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store = None):
     logging.debug("beginning to download file %s", file.name)
     sReturn = ""
     try:
@@ -227,6 +231,11 @@ def downloadFile(service, file: gFile, targetPath:str):
 
         with open(targetPath, "wb+") as f:
             f.write(fileData.getbuffer())
+
+        if threadSafeDB is not None:
+            threadSafeDB.insert_gObject(file=file)
+        else:
+            DATABASE.insert_gObject(file=file)
 
         fileSize = os.path.getsize(targetPath)
         sReturn = "file %s written %d byes." % (targetPath, fileSize)
@@ -312,7 +321,7 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
                 #print(f)
                 with open(FOLDERS_CACHE_PATH + f['id'], 'w+') as folder_data:
                     folderObj = gFolder(f)
-                    DATABASE.insert_gObject(folderObj)
+                    DATABASE.insert_gObject(folder=folderObj)
                     if 'parents' in folderObj.properties.keys():
                         DATABASE.insert_parents(folderObj.id, folderObj.properties['parents'])
                     folder_data.write(json.dumps(f, indent=5))
@@ -417,7 +426,7 @@ def main():
     ROOT_FOLDER_OBJECT = rootFolder
 
     DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
-    DATABASE.insert_gObject(rootFolder)
+    DATABASE.insert_gObject(folder=rootFolder)
 
     logging.info("clearing the local folder cache")
     clearFolderCache(FOLDERS_CACHE_PATH)

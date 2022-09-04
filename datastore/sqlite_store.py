@@ -1,5 +1,5 @@
 import sqlite3
-from sqlite3 import Error
+from sqlite3 import SQLITE_PRAGMA, Error
 import logging
 from typing import List
 import json
@@ -47,8 +47,9 @@ class sqlite_store:
             logging.error("error creating database schema %s." % str(err))
 
     def create_db(self, dbPath: str):
+        logging.debug("creating database %s" % dbPath)
         try:
-            self.conn = sqlite3.connect(dbPath)
+            self.conn = sqlite3.connect(dbPath, check_same_thread=False)
             self.__create_schema()
         except sqlite3.Error as error:
             logging.error("unable to create databaase %s. %s" % (dbPath, str(e)))
@@ -56,10 +57,12 @@ class sqlite_store:
             logging.error("unable to create databaase %s. %s" % (dbPath, str(e)))
 
     def fetch_gObject(self, id: str):
+        logging.debug("fetching database object with id %s" % id)
         objects = []
         try:
-            fetchObject_sql = "SELECT * FROM gObjects WHERE id = '" + id + "';"
-            self.cursor.execute(fetchObject_sql)
+            fetchObject_sql = "SELECT * FROM gObjects WHERE id = ?;"
+            sqlParams = (id, )
+            self.cursor.execute(fetchObject_sql, sqlParams)
             rows = self.cursor.fetchall()
         
             for row in rows:
@@ -68,7 +71,7 @@ class sqlite_store:
                     objects.append(folder)
                 else:
                     file = gFile(json.loads(row[3]))
-                    objects.append(folder)
+                    objects.append(file)
 
         except sqlite3.Error as e:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
@@ -80,9 +83,10 @@ class sqlite_store:
     def fetch_parents(self, id: str):
         parents = []
         try:
-            fetchObject_sql = "SELECT * FROM relationships WHERE child_id = '" + id + "';" 
+            fetchObject_sql = "SELECT * FROM relationships WHERE child_id = ?;"
+            sqlParams = (id, ) 
 
-            self.cursor.execute(fetchObject_sql)
+            self.cursor.execute(fetchObject_sql, sqlParams)
             rows = self.cursor.fetchall()
         
             for row in rows:
@@ -109,19 +113,15 @@ class sqlite_store:
         try:
             f = self.fetch_gObject(folder.id)
             if len(f) == 1:
-                self.update_gObject(f[0])
+                self.__update_gFolder(f[0])
             elif len(f) > 1:
                 raise("folder already exists and more than one record in the database.  resolve manually")
             else:
                 # do we want to base64 the properties json blob?
                 procInsertObject_sql = "INSERT INTO gObjects\
-                                        (id, name, mime_type, properties) VALUES ('" +\
-                                            folder.id + "','"  +\
-                                            folder.name + "','"  +\
-                                            folder.mimeType + "','"  +\
-                                            json.dumps(folder.properties) + "');"
-
-                self.cursor.execute(procInsertObject_sql)
+                                        (id, name, mime_type, properties) VALUES (?, ?, ?, ?);"
+                sqlParams = (folder.id, folder.name, folder.mimeType, json.dumps(folder.properties))
+                self.cursor.execute(procInsertObject_sql, sqlParams)
                 self.conn.commit()
         except sqlite3.Error as e:
 
@@ -129,30 +129,29 @@ class sqlite_store:
         except Exception as e:
             logging.error("unable to insert folder %s into database. %s" % (folder.name, str(e)))
 
-    def __insert_gFile(self, file: gFile, i):
+    def __insert_gFile(self, file: gFile):
         try:
-            procInsertObject_sql = "INSERT INTO gObjects\
-                                      (id, name, mime_type, properties) VALUES ('" +\
-                                        file.id + "','"  +\
-                                        file.name + "','"  +\
-                                        file.mimeType + "','"  +\
-                                        json.dumps(file.properties) + "');"
-
-            self.cursor.execute(procInsertObject_sql)
-            self.conn.commit()
-
-            for parent in file.properties['parents']:
-                procInsertRelationships_sql = "INSERT INTO relationships \
-                                            (parent_id, child_id) VALUES ('" +\
-                                            parent + "', '" + \
-                                            file.id + "');"
-                self.cursor.execute(procInsertRelationships_sql)
+            f = self.fetch_gObject(file.id)
+            if len(f) == 1:
+                self.update_gObject(f[0])
+            elif len(f) > 1:
+                raise("file already exists and more than one record in the database.  resolve manually")
+            else:
+                procInsertObject_sql = "INSERT INTO gObjects\
+                                        (id, name, mime_type, properties) VALUES (?, ?, ?, ?);"
+                sqlParams = (file.id, file.name, file.mimeType, json.dumps(file.properties))
+                self.cursor.execute(procInsertObject_sql, sqlParams)
                 self.conn.commit()
 
+            if 'parents' in file.properties.keys():
+                self.insert_parents(file.id, file.properties['parents'])
+            else:
+                logging.warning("%s file id doesn't have any parents." % file.id)
+
         except sqlite3.Error as e:
-            logging.error("unable to insert folder %s into database. %s" % (file.name, str(e)))
+            logging.error("unable to insert file %s into database. %s" % (file.name, str(e)))
         except Exception as e:
-            logging.error("unable to insert folder %s into database. %s" % (file.name, str(e)))
+            logging.error("unable to insert file %s into database. %s" % (file.name, str(e)))
 
     def insert_parents(self, id:str, parents: List[str]):
         try:
@@ -165,11 +164,9 @@ class sqlite_store:
             else:
                 #do the insert
                 for parent in parents:
-                    procInsertRelationships_sql = "INSERT INTO relationships \
-                                            (parent_id, child_id) VALUES ('" +\
-                                            parent + "', '" + \
-                                            id + "');"
-                    self.cursor.execute(procInsertRelationships_sql)
+                    procInsertRelationships_sql = "INSERT INTO relationships (parent_id, child_id) VALUES (?, ?);"
+                    sqlParams = (parent, id)
+                    self.cursor.execute(procInsertRelationships_sql, sqlParams)
                 self.conn.commit()
 
         except sqlite3.Error as e:
@@ -177,31 +174,55 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to insert parents for object id %s. %s" % (id, str(e))) 
                 
+    def update_gObject(self, folder: gFolder = None, file: gFile = None):
+        if folder is not None and file is not None:
+            raise("invalid parameter set.  supply folder or file option, not both.")
+        elif folder is not None:
+            self.__update_gFolder(folder)
+        else:
+            self.__update_gFile(file)
 
 
-
-    def update_gObject(self, folder: gFolder):
+    def __update_gFolder(self, folder: gFolder):
         try:
-            updateObject_sql = "UPDATE gObjects SET "\
-                                    "name = '" + folder.name + "'," + \
-                                    "properties = '" + json.dumps(folder.properties) + "' " + \
-                                    "WHERE id = '" + folder.id + "';"
-            
-            
-            self.cursor.execute(updateObject_sql)
+            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ? WHERE id = ?;"
+            sqlParams = (folder.name, json.dumps(folder.properties), folder.id)
+    
+            self.cursor.execute(updateObject_sql, sqlParams)
             self.conn.commit()
-        
+
+            if 'parents' in folder.properties.keys():
+                self.update_parents(folder.id, folder.properties['parents'])
+
+        except sqlite3.Error as e:
+            logging.error("Unable to update folder object id %s. %s" % (id, str(e)))
+        except Exception as e:
+            logging.error("Unable to update folder object id %s. %s" % (id, str(e)))
+
+    def __update_gFile(self, file: gFolder):
+        try:
+            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ? WHERE id = ?;"
+            sqlParams = (file.name, json.dumps(file.properties), file.id)
+    
+            self.cursor.execute(updateObject_sql, sqlParams)
+            self.conn.commit()
+            
+
+            if 'parents' in file.properties.keys():
+                self.update_parents(file.id, file.properties['parents'])
+            else:
+                logging.warning("file id %s doesn't have any parents." % file.id)
+            
         except sqlite3.Error as e:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
         except Exception as e:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
 
-    
-    # this isn't right.  need to delete the existing data and re-insert since we are assuming the the update is authoritative
     def update_parents(self, id:str, parents: List[str]):
         try:
-            deleteParents_sql = "DELETE FROM relationships WHERE child_id = '" + id + "';"
-            self.cursor.execute(deleteParents_sql)
+            deleteParents_sql = "DELETE FROM relationships WHERE child_id = ?;"
+            sqlParams = (id, )
+            self.cursor.execute(deleteParents_sql, sqlParams)
             self.conn.commit()
             
             self.insert_parents(id, parents)
@@ -214,7 +235,7 @@ class sqlite_store:
 
     def open(self, dbPath: str):
         try:
-            self.conn = sqlite3.connect(dbPath)
+            self.conn = sqlite3.connect(dbPath, check_same_thread=False)
             self.cursor = self.conn.cursor()
         except sqlite3.Error as error:
             logging.error("error closing database. %s" % str(e))
