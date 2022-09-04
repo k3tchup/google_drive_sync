@@ -1,4 +1,6 @@
 from __future__ import print_function
+from http.client import BAD_REQUEST
+from multiprocessing.connection import wait
 from typing import List
 import json
 import io
@@ -6,13 +8,19 @@ import logging
 import os.path
 import concurrent.futures
 
+# gogole and http imports
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
+import googleapiclient
+import google_auth_httplib2
+import httplib2
+from googleapiclient import discovery
 
+# application imports
 from gDrive_data_structures.data_types import *
 
 # global variables
@@ -40,6 +48,15 @@ MEDIA_EXPORT_MATRIX = {
 }
 ROOT_FOLDER_ID = ""
 ROOT_FOLDER_OBJECT = None
+MAX_THREADS = 1
+CREDENTIALS = None
+
+# Create a new Http() object for every request
+# https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
+# overrides the constructor of the http2 object 
+def build_request(http, *args, **kwargs):
+    new_http = google_auth_httplib2.AuthorizedHttp(CREDENTIALS, http=httplib2.Http())
+    return googleapiclient.http.HttpRequest(new_http, *args, **kwargs)
 
 # get the root folder
 def getRootFolder(service) -> gFolder:
@@ -156,13 +173,41 @@ def listFileInDirectory(service, folder:gFolder, maxFiles = 1000) -> List[gFile]
     return files
 
 # download all files in a folder (non-recursive)
-def downloadFilesFromFolder():
-    return
+def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
+    logging.debug("starting to download files from %s to %s" % (folder.name, targetDir))
+    bResult = False
+    try:
+        files = listFileInDirectory(service, folder)
 
-# download a single file
-def downloadFile(service, file: gFile, targetPath:str)-> bool:
+        # the google api module isn't thread safe, since it's based on http2 which also isn't thread safe
+        # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
+        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+            futures = []
+            for f in files:
+                if not "application/vnd.google-apps" in f.properties['mimeType']:
+                    filePath = os.path.join(targetDir, folder.name, f.name)
+
+                    # build a new http2 object to enable thread safety.  gets passed to each thread   
+                    credentials = Credentials.from_authorized_user_file(TOKEN_CACHE, TARGET_SCOPES)
+                    authorized_http = google_auth_httplib2.AuthorizedHttp(credentials, http=httplib2.Http())
+                    service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
+                    
+                    futures.append(executor.submit(
+                            downloadFile, service, f, filePath
+                        ))
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result()
+                print(str(result))
+            #wait(futures) # want to make sure we don't start too many threads
+    except Exception as err:
+        logging.error("error downloading directory %s. %s." % (folder.name, str(err)))
+        bResult = False
+    return bResult
+
+# download a single file (will be called multi-threaded)
+def downloadFile(service, file: gFile, targetPath:str):
     logging.debug("beginning to download file %s", file.name)
-    bSuccess = False
+    sReturn = ""
     try:
         gServiceFiles = service.files()
         params = { "fileId": file.id,
@@ -175,16 +220,24 @@ def downloadFile(service, file: gFile, targetPath:str)-> bool:
         print("downloading file %s." % targetPath)
         while done is False:
             status, done = downloader.next_chunk()
-            print(F'Download {int(status.progress() * 100)}.')
+            #print(F'Download {int(status.progress() * 100)}.')
 
         with open(targetPath, "wb+") as f:
             f.write(fileData.getbuffer())
 
+        fileSize = os.path.getsize(targetPath)
+        sReturn = "file %s written %d byes." % (targetPath, fileSize)
+
+
     except HttpError as err:
         logging.error("error downloading file. %s" % str(err))
         print(err)
-        bSuccess = False
-    return bSuccess
+        sReturn = "file %s download failed with %s" % (targetPath, str(err))
+    except Exception as err:
+        logging.error("error downloading file. %s" % str(err))
+        print(err)
+        sReturn = "file %s download failed with %s" % (targetPath, str(err))
+    return sReturn
 
 # export a native google document format (can't be downloaded)
 def exportNativeFile(service, file: gFile, targetPath: str)-> bool:
@@ -240,7 +293,6 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
         if ROOT_FOLDER_ID == '':
             ROOT_FOLDER_ID = rootFolder['id']
     
-
         #print('List files')
         
         pageToken = None
@@ -265,6 +317,21 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
     except HttpError as err:
         logging.error("error writing local folder cache. %s", str(err))
         print(err)
+
+# full sync down
+
+def doFullDownload(service, folder: gFolder, targetPath:str):
+    logging.debug("starting full download from google drive to %s" % targetPath)
+    try:
+        downloadFilesFromFolder(service, folder, os.path.join(targetPath))
+        if folder.children is not None:
+            for child in folder.children:
+                doFullDownload(service, child, os.path.join(targetPath, folder.name))
+        
+    except Exception as err:
+        logging.error("error writing local folder cache. %s" % str(err))
+        print(str(err))
+    
 
 
 
@@ -321,9 +388,14 @@ def main():
                 token.write(creds.to_json())
         except HttpError as err:
             print(err)
+    
+    # cache tokens globally for multi-threading
+    global CREDENTIALS
+    CREDENTIALS = creds
 
     service = build('drive', 'v3', credentials=creds)
 
+    #populate root folder objects so that we can map the parents and children
     logging.debug("Fetching the root folder from Google drive.")    
     rootFolder = getRootFolder(service)
     global ROOT_FOLDER_ID 
@@ -331,56 +403,33 @@ def main():
     global ROOT_FOLDER_OBJECT 
     ROOT_FOLDER_OBJECT = rootFolder
 
-    logging.info("clearning the local folder cache")
+    logging.info("clearing the local folder cache")
     clearFolderCache(FOLDERS_CACHE_PATH)
 
     # fetch all the folders and structure from google drive
     writeFolderCache(service)
+
     # read the local cache and create linked folder tree objects
     folders = readFolderCache(FOLDERS_CACHE_PATH)
     rootFolder = (list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders)))[0]
+    ROOT_FOLDER_OBJECT = rootFolder
     #printFolderTree(folders)
     copyFolderTree(rootFolder, '/home/ketchup/gdrive')
 
-    files = listFileInDirectory(service, rootFolder)
-    '''
-    for f in files:
-        print("Downloading file: " + f.name + "; mime type: " + f.properties['mimeType'])
-        if "application/vnd.google-apps" in f.properties['mimeType']:
-            if EXPORT_NATIVE_DOCS:
-                exportNativeFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
-        else:
-            downloadFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
-    '''
-
     # max threads
-    maxThreads = os.cpu_count() - 1
-    logging.info("initializing %d threads", maxThreads)
+    global MAX_THREADS
+    MAX_THREADS = os.cpu_count() - 1
+    logging.info("initializing %d threads", MAX_THREADS)
 
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=maxThreads) as executor:
-        futures = []
-        for f in files:
-            if "application/vnd.google-apps" in f.properties['mimeType']:
-                if EXPORT_NATIVE_DOCS:
-                    futures.append(executor.submit(
-                        exportNativeFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
-                    ))
-            else:
-                futures.append(executor.submit(
-                        downloadFile(service, f, os.path.join("/home/ketchup/gdrive", rootFolder.name, f.name))
-                    ))
-            
-        #for future in concurrent.futures.as_completed(futures):
-        #    future.done
-            
+    #downloadFilesFromFolder(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
+    doFullDownload(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
 
     service.close()
     logging.info("Finished sync.")
 
     
    
-
 
 if __name__ == '__main__':
     main()
