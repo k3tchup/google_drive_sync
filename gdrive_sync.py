@@ -7,6 +7,7 @@ import io
 import logging
 import os.path
 import concurrent.futures
+import hashlib
 
 # gogole and http imports
 from google.auth.transport.requests import Request
@@ -168,6 +169,7 @@ def listFileInDirectory(service, folder:gFolder, maxFiles = 1000) -> List[gFile]
             fs = files_page.get('files', [])
             for f in fs:
                 objFile = gFile(f)
+                objFile.md5 = None
                 files.append(objFile)
 
             request = gServiceFiles.list_next(request, files_page)
@@ -226,12 +228,15 @@ def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store
         downloader = MediaIoBaseDownload(fileData, request)
         done = False
         print("downloading file %s." % targetPath)
+
         while done is False:
             status, done = downloader.next_chunk()
             #print(F'Download {int(status.progress() * 100)}.')
 
         with open(targetPath, "wb+") as f:
             f.write(fileData.getbuffer())
+
+        file.md5 = hashFile(targetPath)
 
         if threadSafeDB is not None:
             threadSafeDB.insert_gObject(file=file)
@@ -251,6 +256,15 @@ def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store
         print(err)
         sReturn = "file %s download failed with %s" % (targetPath, str(err))
     return sReturn
+
+def hashFile(filePath: str):
+    hash  = hashlib.md5()
+    fileBytes  = bytearray(128*1024)
+    mv = memoryview(fileBytes)
+    with open(filePath, 'rb', buffering=0) as f:
+        while n := f.readinto(mv):
+            hash.update(mv[:n])
+    return hash.hexdigest()
 
 # export a native google document format (can't be downloaded)
 def exportNativeFile(service, file: gFile, targetPath: str)-> bool:

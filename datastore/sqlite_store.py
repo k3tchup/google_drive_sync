@@ -25,6 +25,7 @@ class sqlite_store:
                                 id nvarchar(100) PRIMARY KEY,\
                                 name text NOT NULL,\
                                 mime_type text NOT NULL,\
+                                md5 text,\
                                 properties text NOT NULL\
                             );"
             parentChildrenTable_sql = "CREATE TABLE IF NOT EXISTS relationships (\
@@ -113,7 +114,8 @@ class sqlite_store:
         try:
             f = self.fetch_gObject(folder.id)
             if len(f) == 1:
-                self.__update_gFolder(f[0])
+                f[0].properties = folder.properties
+                self.__update_gFolder(folder=f[0])
             elif len(f) > 1:
                 raise("folder already exists and more than one record in the database.  resolve manually")
             else:
@@ -133,13 +135,15 @@ class sqlite_store:
         try:
             f = self.fetch_gObject(file.id)
             if len(f) == 1:
-                self.update_gObject(f[0])
+                f[0].md5 = file.md5
+                f[0].properties = file.properties
+                self.update_gObject(file=f[0])
             elif len(f) > 1:
                 raise("file already exists and more than one record in the database.  resolve manually")
             else:
                 procInsertObject_sql = "INSERT INTO gObjects\
-                                        (id, name, mime_type, properties) VALUES (?, ?, ?, ?);"
-                sqlParams = (file.id, file.name, file.mimeType, json.dumps(file.properties))
+                                        (id, name, mime_type, properties, md5) VALUES (?, ?, ?, ?, ?);"
+                sqlParams = (file.id, file.name, file.mimeType, json.dumps(file.properties), file.md5)
                 self.cursor.execute(procInsertObject_sql, sqlParams)
                 self.conn.commit()
 
@@ -199,10 +203,10 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to update folder object id %s. %s" % (id, str(e)))
 
-    def __update_gFile(self, file: gFolder):
+    def __update_gFile(self, file: gFile):
         try:
-            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ? WHERE id = ?;"
-            sqlParams = (file.name, json.dumps(file.properties), file.id)
+            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ?, md5 = ? WHERE id = ?;"
+            sqlParams = (file.name, json.dumps(file.properties), file.md5, file.id)
     
             self.cursor.execute(updateObject_sql, sqlParams)
             self.conn.commit()

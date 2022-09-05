@@ -23,3 +23,4 @@ class gFile(gDriveElement):
     def __init__(self, driveObjectData):
         super().__init__(driveObjectData)
         self.properties = driveObjectData
+        self.md5 = None
