@@ -1,3 +1,4 @@
+import mimetypes
 import sqlite3
 from sqlite3 import SQLITE_PRAGMA, Error
 import logging
@@ -26,6 +27,7 @@ class sqlite_store:
                                 name text NOT NULL,\
                                 mime_type text NOT NULL,\
                                 md5 text,\
+                                local_path text,\
                                 properties text NOT NULL\
                             );"
             parentChildrenTable_sql = "CREATE TABLE IF NOT EXISTS relationships (\
@@ -100,6 +102,40 @@ class sqlite_store:
             logging.error("Unable to fetch relationships for id %s. %s" % (id, str(e)))
 
         return parents
+    
+    def fetch_gObjectSet(self, pageSize:int = 100, offset:int=0):
+        gObjects = []
+        totalFetched = 0
+        try:
+            fetchObjects_sql = "SELECT id, name, mime_type, md5, local_path, properties FROM gOjects LIMIT ? OFFSET ?;"
+            sqlParams = (pageSize, offset)
+
+            self.cursor.execute(fetchObjects_sql, sqlParams)
+            rows = self.cursor.fetchall()
+
+            for row in rows:
+                mimeType = row[2]
+                if "folder" in mimeType:
+                    f = gFolder()
+                else:
+                    f = gFile()
+                    f.md5 = row[3]
+                f.id = row[0]
+                f.name = row[1]
+                f.mimeType = row[2]
+                f.localPath = row[4]
+                f.properties = row[5]
+
+                gObjects.append(f)
+
+                totalFetched += 1
+                
+        except sqlite3.Error as e:
+            logging.error("Unable to fetch records. %s" % str(e))
+        except Exception as e:
+            logging.error("Unable to fetch records. %s" % str(e))
+
+        return gObjects, totalFetched
 
     def insert_gObject(self, folder:gFolder = None, file:gFile = None):
         if folder is not None and file is not None:
@@ -121,8 +157,8 @@ class sqlite_store:
             else:
                 # do we want to base64 the properties json blob?
                 procInsertObject_sql = "INSERT INTO gObjects\
-                                        (id, name, mime_type, properties) VALUES (?, ?, ?, ?);"
-                sqlParams = (folder.id, folder.name, folder.mimeType, json.dumps(folder.properties))
+                                        (id, name, mime_type, local_path, properties) VALUES (?, ?, ?, ?, ?);"
+                sqlParams = (folder.id, folder.name, folder.mimeType, folder.localPath, json.dumps(folder.properties))
                 self.cursor.execute(procInsertObject_sql, sqlParams)
                 self.conn.commit()
         except sqlite3.Error as e:
@@ -142,8 +178,8 @@ class sqlite_store:
                 raise("file already exists and more than one record in the database.  resolve manually")
             else:
                 procInsertObject_sql = "INSERT INTO gObjects\
-                                        (id, name, mime_type, properties, md5) VALUES (?, ?, ?, ?, ?);"
-                sqlParams = (file.id, file.name, file.mimeType, json.dumps(file.properties), file.md5)
+                                        (id, name, mime_type, properties, md5, local_path) VALUES (?, ?, ?, ?, ?, ?);"
+                sqlParams = (file.id, file.name, file.mimeType, json.dumps(file.properties), file.md5, file.localPath)
                 self.cursor.execute(procInsertObject_sql, sqlParams)
                 self.conn.commit()
 
@@ -189,8 +225,8 @@ class sqlite_store:
 
     def __update_gFolder(self, folder: gFolder):
         try:
-            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ? WHERE id = ?;"
-            sqlParams = (folder.name, json.dumps(folder.properties), folder.id)
+            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ?, local_path = ? WHERE id = ?;"
+            sqlParams = (folder.name, json.dumps(folder.properties), folder.localPath, folder.id)
     
             self.cursor.execute(updateObject_sql, sqlParams)
             self.conn.commit()
@@ -205,8 +241,8 @@ class sqlite_store:
 
     def __update_gFile(self, file: gFile):
         try:
-            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ?, md5 = ? WHERE id = ?;"
-            sqlParams = (file.name, json.dumps(file.properties), file.md5, file.id)
+            updateObject_sql = "UPDATE gObjects SET name = ?, properties = ?, md5 = ?, local_path = ? WHERE id = ?;"
+            sqlParams = (file.name, json.dumps(file.properties), file.md5, file.localPath, file.id)
     
             self.cursor.execute(updateObject_sql, sqlParams)
             self.conn.commit()

@@ -4,6 +4,7 @@ class gDriveElement:
         self.id = driveObjectData['id']
         self.name = driveObjectData['name']
         self.mimeType = driveObjectData['mimeType']
+        self.localPath = ""
 
     def to_dict(self) -> dict:
         props = copy.deepcopy(vars(self))

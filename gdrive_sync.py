@@ -30,6 +30,7 @@ TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
 APP_CREDS = '/home/ketchup/vscode/gdrive_client/credentials.json'
 LPORT = 34888
 FOLDERS_CACHE_PATH = '/home/ketchup/vscode/gdrive_client/folders/'
+DRIVE_CACHE_PATH = "~/gdrive/"
 PAGE_SIZE = 50
 FOLDER_FIELDS = 'files(*)'
 FILE_FIELDS = 'files(*)'
@@ -236,6 +237,7 @@ def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store
         with open(targetPath, "wb+") as f:
             f.write(fileData.getbuffer())
 
+        file.localPath = targetPath
         file.md5 = hashFile(targetPath)
 
         if threadSafeDB is not None:
@@ -404,7 +406,16 @@ def getDriveChanges(service, changeToken):
 
     return changes
 
+# identify files in the database that are missing or different on disk
+def get_diff_disk_db():
+    localDrivePath = os.path.join(DRIVE_CACHE_PATH, ROOT_FOLDER_OBJECT.name)
+
+    # loop through files on disk and find any that aren't in the db or different by hash
     
+
+    return
+
+# identify files on disk that are missing or different from the database
 
 def main():
 
