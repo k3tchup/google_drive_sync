@@ -1,4 +1,5 @@
 from __future__ import print_function
+from genericpath import isdir, isfile
 from http.client import BAD_REQUEST
 from multiprocessing.connection import wait
 from typing import List
@@ -406,12 +407,52 @@ def getDriveChanges(service, changeToken):
 
     return changes
 
+def scanLocalFiles(parentFolder:str):
+    try:
+        objects = os.listdir(parentFolder)
+        for object in objects:
+            object = os.path.join(parentFolder, object)
+            if os.path.isfile(object):
+                # multi-thread this too
+                md5 = hashFile(object)
+                DATABASE.insert_localFile(object, md5)
+            elif os.path.isdir(object):
+                scanLocalFiles(os.path.join(object))
+            else:
+                return
+        
+
+    except Exception as err:
+        logging.error("error scanning local folder %s. %s", (parentFolder, str(err)))
+        print(str(err))  
+
 # identify files in the database that are missing or different on disk
 def get_diff_disk_db():
-    localDrivePath = os.path.join(DRIVE_CACHE_PATH, ROOT_FOLDER_OBJECT.name)
+    localDrivePath = os.path.join(os.path.expanduser(DRIVE_CACHE_PATH), ROOT_FOLDER_OBJECT.name)
 
     # loop through files on disk and find any that aren't in the db or different by hash
-    
+    # hash the local files and stick them into a temp table along with the md5 hash
+    # then it's just sql from there
+
+    logging.info("starting to scan local Google drive cache in %s" % localDrivePath)
+    DATABASE.clear_local_files()
+    scanLocalFiles(localDrivePath)
+
+    '''
+    SELECT lf.* FROM local_files lf
+    LEFT JOIN gObjects g 
+    ON g.md5 = lf.md5 AND g.local_path = lf.path
+    WHERE g.md5 IS NULL;
+
+    SELECT g.* FROM gObjects g
+    LEFT JOIN local_files lf
+    ON g.md5 = lf.md5 AND g.local_path = lf.path
+    WHERE lf.md5 IS NULL
+    AND g.mime_type NOT LIKE "%folder%";
+    '''
+
+
+
 
     return
 
@@ -493,6 +534,8 @@ def main():
 
     DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
     DATABASE.insert_gObject(folder=rootFolder)
+
+    get_diff_disk_db()
 
     # start tracking changes
     global CHANGES_TOKEN

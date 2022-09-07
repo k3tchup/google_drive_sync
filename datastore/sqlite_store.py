@@ -38,16 +38,34 @@ class sqlite_store:
                                 FOREIGN KEY (child_id) REFERENCES gObjects (id)\
                             );"
 
+            localFiles_sql = "CREATE TABLE IF NOT EXISTS local_files (\
+                                id integer PRIMARY KEY, \
+                                path text NOT NULL, \
+                                md5 text NOT NULL);"
+
             procInsertObject_sql = "INSERT INTO gObjects\
                                     (id, Name, Joining_date, salary) VALUES (%s,%s,%s,%s)"
             
             self.cursor = self.conn.cursor()
             self.cursor.execute(gObjectTable_sql)
             self.cursor.execute(parentChildrenTable_sql)
+            self.cursor.execute(localFiles_sql)
         except sqlite3.Error as error:
             logging.error("error creating database schema %s." % str(err))
         except Exception as err:
             logging.error("error creating database schema %s." % str(err))
+
+    def clear_local_files(self):
+        logging.debug("clearing the local_files table")
+        try:
+            truncateLocalFiles_sql = "DELETE FROM local_files;"
+            self.cursor.execute(truncateLocalFiles_sql)
+        
+        except sqlite3.Error as e:
+            logging.error("Unable to truncate the local_files table. %s" % str(e))
+        except Exception as e:
+            logging.error("Unable to truncate the local_files table. %s" % str(e))
+
 
     def create_db(self, dbPath: str):
         logging.debug("creating database %s" % dbPath)
@@ -151,6 +169,7 @@ class sqlite_store:
             f = self.fetch_gObject(folder.id)
             if len(f) == 1:
                 f[0].properties = folder.properties
+                f[0].localPath = folder.localPath
                 self.__update_gFolder(folder=f[0])
             elif len(f) > 1:
                 raise("folder already exists and more than one record in the database.  resolve manually")
@@ -173,6 +192,7 @@ class sqlite_store:
             if len(f) == 1:
                 f[0].md5 = file.md5
                 f[0].properties = file.properties
+                f[0].localPath = file.localPath
                 self.update_gObject(file=f[0])
             elif len(f) > 1:
                 raise("file already exists and more than one record in the database.  resolve manually")
@@ -214,6 +234,17 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to insert parents for object id %s. %s" % (id, str(e))) 
                 
+    def insert_localFile(self, path:str, md5: str):
+        try:
+            insert_localFile_sql = "INSERT INTO local_files (path, md5) values (?, ?);"
+            sqlParams = (path, md5)
+            self.cursor.execute(insert_localFile_sql, sqlParams)
+
+        except sqlite3.Error as e:
+            logging.error("Unable to insert parents for object id %s. %s" % (id, str(e)))
+        except Exception as e:
+            logging.error("Unable to insert parents for object id %s. %s" % (id, str(e))) 
+    
     def update_gObject(self, folder: gFolder = None, file: gFile = None):
         if folder is not None and file is not None:
             raise("invalid parameter set.  supply folder or file option, not both.")
