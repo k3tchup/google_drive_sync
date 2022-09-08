@@ -81,7 +81,7 @@ class sqlite_store:
         logging.debug("fetching database object with id %s" % id)
         objects = []
         try:
-            fetchObject_sql = "SELECT * FROM gObjects WHERE id = ?;"
+            fetchObject_sql = "SELECT id, name, mime_type, properties, md5, local_path FROM gObjects WHERE id = ?;"
             sqlParams = (id, )
             self.cursor.execute(fetchObject_sql, sqlParams)
             rows = self.cursor.fetchall()
@@ -89,9 +89,12 @@ class sqlite_store:
             for row in rows:
                 if row[2] == 'application/vnd.google-apps.folder':
                     folder = gFolder(json.loads(row[3]))
+                    folder.localPath = row[5]
                     objects.append(folder)
                 else:
                     file = gFile(json.loads(row[3]))
+                    file.md5 = row[4]
+                    file.localPath = row[5]
                     objects.append(file)
 
         except sqlite3.Error as e:

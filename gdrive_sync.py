@@ -9,6 +9,7 @@ import logging
 import os.path
 import concurrent.futures
 import hashlib
+from datetime import datetime
 
 # gogole and http imports
 from google.auth.transport.requests import Request
@@ -426,6 +427,50 @@ def scanLocalFiles(parentFolder:str):
         logging.error("error scanning local folder %s. %s", (parentFolder, str(err)))
         print(str(err))  
 
+# scans all files in the drive and identifies hash mimatches or missing files against the db
+def scan_drive_files(service) -> List:
+    # loop through the pages of files from google drive
+    # return the md5Checksum property, along with name, id, mimeType, version, parents
+    # compare files by id with the db.  look where the md5Checksum != md5 stored in the db
+    # also look for files not in the db
+    # important: if the file in google drive is a later version, it's authoritative
+    # this will be the changes from the side of google drive
+    
+    logging.info("scanning google drive files, looking for changes")
+    differences = []
+    try:
+        gServiceFiles = service.files()
+        params = { "pageSize": PAGE_SIZE, 
+                    "fields": "nextPageToken," + "files(id, name, mimeType, version, md5Checksum, parents)"
+        }
+        request = gServiceFiles.list(**params)
+
+        while (request is not None):
+            files_page = request.execute()
+            fs = files_page.get('files', [])
+            for f in fs:
+                googleFile = gFile(f)
+                dbFile = None
+                rows = DATABASE.fetch_gObject(googleFile.id)
+                if len(rows) > 0:
+                    dbFile = rows[0]
+                if dbFile is not None:
+                    if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
+                        dbFile.mimeType != googleFile.mimeType) and \
+                        dbFile.properties['version'] < googleFile.properties['version']:
+                            differences.append(googleFile)
+                else:
+                    differences.append(googleFile)
+            request = gServiceFiles.list_next(request, files_page)
+    except HttpError as err:
+        logging.error("error scanning google drive files. %s" % str(err))
+        print(err)
+    except Exception as err:
+        logging.error("error scanning google drive files. %s" % str(err))
+        print(err)
+    return differences
+
+
 # identify files in the database that are missing or different on disk
 def get_diff_disk_db():
     localDrivePath = os.path.join(os.path.expanduser(DRIVE_CACHE_PATH), ROOT_FOLDER_OBJECT.name)
@@ -451,6 +496,8 @@ def get_diff_disk_db():
     AND g.mime_type NOT LIKE "%folder%";
     '''
 
+    # get a list of files from google drive and see if the versions differ from what's in the db
+    # this is assuming that the local file isn't authoritative, but that's later
 
 
 
@@ -501,13 +548,23 @@ def main():
                 logging.warning("token cache scopes are not valid, removing token")
                 creds = None
                 os.remove(TOKEN_CACHE)
+            tokenExpires = datetime.strptime(token['expiry'], "%Y-%m-%dT%H:%M:%S.%fZ")
+            if datetime.now() > tokenExpires:
+                logging.warning("token cache has expired.")
+                creds = None
+                os.remove(TOKEN_CACHE)
+            
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
         logging.warning("valid credentials weren't found, initialize oauth consent")
         try:
             if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
+                try:
+                    creds.refresh(Request())
+                except HttpError as err:
+                    logging.error("error logging in to google drive. %s" % str(err))
+                    print(err)                
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(APP_CREDS, TARGET_SCOPES)
                 creds = flow.run_local_server(port=0)
@@ -535,6 +592,7 @@ def main():
     DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
     DATABASE.insert_gObject(folder=rootFolder)
 
+    google_drive_changes = scan_drive_files(service)
     get_diff_disk_db()
 
     # start tracking changes
@@ -567,9 +625,7 @@ def main():
 
     service.close()
     DATABASE.close()
-    logging.info("Finished sync.")
-
-    
+    logging.info("Finished sync.") 
    
 
 if __name__ == '__main__':
