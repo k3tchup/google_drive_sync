@@ -306,6 +306,24 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to update parents for object id %s. %s" % (id, str(e))) 
 
+    def delete_files_not_on_disk(self):
+        try:
+            delete_sql = 'DELETE FROM gObjects \
+                            WHERE id IN (\
+                            SELECT gObjects.id from gObjects\
+                            LEFT JOIN local_files \
+                            ON gObjects.md5 = local_files.md5 AND \
+                            gObjects.local_path = local_files.path \
+                            WHERE local_files.md5 IS NULL \
+                            AND gObjects.mime_type NOT LIKE "%folder%");'
+            self.cursor.execute(delete_sql)
+            self.conn.commit()
+            
+        except sqlite3.Error as e:
+            logging.error("Error deleting files not on disk. %s" % (id, str(e)))
+        except Exception as e:
+            logging.error("Error deleting files not on disk. %s" % (id, str(e)))
+
 
     def open(self, dbPath: str):
         try:

@@ -11,6 +11,7 @@ import concurrent.futures
 import hashlib
 from datetime import datetime
 
+
 # gogole and http imports
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -122,6 +123,30 @@ def readFolderCache(folder_path: str) -> List[dict]:
                     fObj.add_child(fSearch)
     
     return gFolderObjects
+
+def get_google_object(service, id:str):
+    return_object = None
+    try:
+        gServiceFiles = service.files()
+        params = { "fileId": id,
+                    "fields": "*"
+        }
+        request = gServiceFiles.get(**params)
+        object = request.execute()
+        if object is not None:
+            if object['mimeType'] == 'application/vnd.google-apps.folder':
+                return_object = gFolder(object) 
+            else:
+                return_object = gFile(object)
+
+    except HttpError as err:
+        logging.error("Unable to fetch metadata from google drive for object id %s. %s" % (id, str(err)))
+    except Exception as err:
+        logging.error("Unable to fetch metadata from google drive for object id %s. %s" % (id, str(err)))
+    
+    
+    return return_object
+    
 
 # print out the google drive folder tree (won't be used in production)
 def printFolderTree(folders = None):
@@ -353,6 +378,28 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
         logging.error("error writing local folder cache. %s", str(err))
         print(err)
 
+def get_full_folder_path(service, folder: gFolder)-> str:
+    full_path = str(folder.name)
+    try:
+        if 'parents' in folder.properties.keys():   
+            gServiceFiles = service.files()
+            params = { "fileId": folder.properties['parents'][0], "fields": "parents, mimeType, id, name"}
+            request = gServiceFiles.get(**params)
+            parent = request.execute()
+            full_path = parent['name'] + "/" + full_path
+            while 'parent' in parent.keys():
+                params = { "fileId": parent['parents'][0], "fields": "parents, mimeType, id, name"}
+                request = gServiceFiles.get(**params)
+                parent = request.execute()
+                full_path = parent['name'] + "/" + full_path
+                
+        
+    except Exception as err:
+        logging.error("Error getting full local path for folder id %s. %s" % (folder.id, str(err)))
+        print(str(err))
+
+    return full_path
+
 # full sync down
 def doFullDownload(service, folder: gFolder, targetPath:str):
     logging.debug("starting full download from google drive to %s" % targetPath)
@@ -368,7 +415,7 @@ def doFullDownload(service, folder: gFolder, targetPath:str):
     
 # gets the change token for changes in the drive since last sync
 # https://developers.google.com/drive/api/guides/manage-changes
-def getDriveChangesToken(service):
+def get_drive_changes_token(service):
     logging.info("fetching the start changes token from Google Drive.")
     startToken = None
     try:
@@ -385,7 +432,7 @@ def getDriveChangesToken(service):
 
 # get changes since the last change token fetch
 # https://developers.google.com/drive/api/guides/manage-changes
-def getDriveChanges(service, changeToken):
+def get_drive_changes(service, changeToken):
     changes = []
     try:
         while changeToken is not None:
@@ -408,7 +455,7 @@ def getDriveChanges(service, changeToken):
 
     return changes
 
-def scanLocalFiles(parentFolder:str):
+def scan_local_files(parentFolder:str):
     try:
         objects = os.listdir(parentFolder)
         for object in objects:
@@ -418,7 +465,7 @@ def scanLocalFiles(parentFolder:str):
                 md5 = hashFile(object)
                 DATABASE.insert_localFile(object, md5)
             elif os.path.isdir(object):
-                scanLocalFiles(os.path.join(object))
+                scan_local_files(os.path.join(object))
             else:
                 return
         
@@ -427,8 +474,8 @@ def scanLocalFiles(parentFolder:str):
         logging.error("error scanning local folder %s. %s", (parentFolder, str(err)))
         print(str(err))  
 
-# scans all files in the drive and identifies hash mimatches or missing files against the db
-def scan_drive_files(service) -> List:
+# scans all files in Google drive that aren't in the db.  that's our change set.
+def get_all_drive_files_not_in_db(service) -> List:
     # loop through the pages of files from google drive
     # return the md5Checksum property, along with name, id, mimeType, version, parents
     # compare files by id with the db.  look where the md5Checksum != md5 stored in the db
@@ -440,8 +487,9 @@ def scan_drive_files(service) -> List:
     differences = []
     try:
         gServiceFiles = service.files()
-        params = { "pageSize": PAGE_SIZE, 
-                    "fields": "nextPageToken," + "files(id, name, mimeType, version, md5Checksum, parents)"
+        params = { "q": "'me' in owners",
+                    "pageSize": PAGE_SIZE, 
+                    "fields": "nextPageToken," + "files(id, name, mimeType, version, md5Checksum, parents, ownedByMe)"
         }
         request = gServiceFiles.list(**params)
 
@@ -458,9 +506,16 @@ def scan_drive_files(service) -> List:
                     if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
                         dbFile.mimeType != googleFile.mimeType) and \
                         dbFile.properties['version'] < googleFile.properties['version']:
-                            differences.append(googleFile)
+                            # fetch full metadata of the file
+                            get_params = {"fileId": googleFile.id, "fields": "*"}
+                            get_req = gServiceFiles.get(**get_params)
+                            full_file = gFile(get_req.execute())
+                            differences.append(full_file)
                 else:
-                    differences.append(googleFile)
+                    get_params = {"fileId": googleFile.id, "fields": "*"}
+                    get_req = gServiceFiles.get(**get_params)
+                    full_file = gFile(get_req.execute())
+                    differences.append(full_file)
             request = gServiceFiles.list_next(request, files_page)
     except HttpError as err:
         logging.error("error scanning google drive files. %s" % str(err))
@@ -471,8 +526,8 @@ def scan_drive_files(service) -> List:
     return differences
 
 
-# identify files in the database that are missing or different on disk
-def get_diff_disk_db():
+# identify database entries of files not matching what's on disk.  delete the db entries.
+def reconcile_local_files_with_db():
     localDrivePath = os.path.join(os.path.expanduser(DRIVE_CACHE_PATH), ROOT_FOLDER_OBJECT.name)
 
     # loop through files on disk and find any that aren't in the db or different by hash
@@ -481,25 +536,11 @@ def get_diff_disk_db():
 
     logging.info("starting to scan local Google drive cache in %s" % localDrivePath)
     DATABASE.clear_local_files()
-    scanLocalFiles(localDrivePath)
+    scan_local_files(localDrivePath)
 
-    '''
-    SELECT lf.* FROM local_files lf
-    LEFT JOIN gObjects g 
-    ON g.md5 = lf.md5 AND g.local_path = lf.path
-    WHERE g.md5 IS NULL;
-
-    SELECT g.* FROM gObjects g
-    LEFT JOIN local_files lf
-    ON g.md5 = lf.md5 AND g.local_path = lf.path
-    WHERE lf.md5 IS NULL
-    AND g.mime_type NOT LIKE "%folder%";
-    '''
-
-    # get a list of files from google drive and see if the versions differ from what's in the db
-    # this is assuming that the local file isn't authoritative, but that's later
-
-
+    # any files that are in the db but not on disk, purge the db records
+    logging.info("deleting database entries where file isn't on disk")
+    DATABASE.delete_files_not_on_disk()
 
     return
 
@@ -548,12 +589,15 @@ def main():
                 logging.warning("token cache scopes are not valid, removing token")
                 creds = None
                 os.remove(TOKEN_CACHE)
+            '''
+            # not the actual refresh token expiration.  how do we get that?   
             tokenExpires = datetime.strptime(token['expiry'], "%Y-%m-%dT%H:%M:%S.%fZ")
+            
             if datetime.now() > tokenExpires:
                 logging.warning("token cache has expired.")
                 creds = None
                 os.remove(TOKEN_CACHE)
-            
+            '''
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -592,16 +636,8 @@ def main():
     DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
     DATABASE.insert_gObject(folder=rootFolder)
 
-    google_drive_changes = scan_drive_files(service)
-    get_diff_disk_db()
 
-    # start tracking changes
-    global CHANGES_TOKEN
-    CHANGES_TOKEN = getDriveChangesToken(service)
-    changes = getDriveChanges(service, CHANGES_TOKEN)
-
-
-    logging.info("clearing the local folder cache")
+    #logging.info("clearing the local folder cache")
     #clearFolderCache(FOLDERS_CACHE_PATH)
 
     # fetch all the folders and structure from google drive
@@ -614,6 +650,31 @@ def main():
     #printFolderTree(folders)
     copyFolderTree(rootFolder, '/home/ketchup/gdrive')
 
+
+    # make sure local database is reconciled with what's on disk
+    reconcile_local_files_with_db()
+
+    # get google drive changes
+    google_drive_changes = get_all_drive_files_not_in_db(service)
+
+    # fetch any missing files
+    # *** multi-thread this in the future
+    for f in google_drive_changes:
+        # get all folder locations (can be multiple)
+        if 'vnd.google-apps' not in f.mimeType:
+            for parent_id in f.properties['parents']:
+                parent_folder = get_google_object(service, parent_id)
+                full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
+                full_path = os.path.expanduser(full_path)
+                downloadFile(service, f, full_path)
+    
+
+    # start tracking changes
+    global CHANGES_TOKEN
+    CHANGES_TOKEN = get_drive_changes_token(service)
+    changes = get_drive_changes(service, CHANGES_TOKEN)
+
+
     # max threads
     global MAX_THREADS
     MAX_THREADS = os.cpu_count() - 1
@@ -621,7 +682,9 @@ def main():
 
 
     #downloadFilesFromFolder(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
-    doFullDownload(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
+    
+    # do full download.  only needed on first run
+    #doFullDownload(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
 
     service.close()
     DATABASE.close()
