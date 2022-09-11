@@ -124,13 +124,17 @@ class sqlite_store:
 
         return parents
     
-    def fetch_gObjectSet(self, pageSize:int = 100, offset:int=0):
+    def fetch_gObjectSet(self, pageSize:int = 100, offset:int=0, searchField:str = None, searchCriteria:str=None):
         gObjects = []
         totalFetched = 0
         try:
-            fetchObjects_sql = "SELECT id, name, mime_type, md5, local_path, properties FROM gOjects LIMIT ? OFFSET ?;"
-            sqlParams = (pageSize, offset)
-
+            fetchObjects_sql = "SELECT id, name, mime_type, md5, local_path, properties FROM gOjects "
+            if searchField is not None and searchCriteria is not None:
+                fetchObjects_sql + "WHERE ? LIKE ? "
+                sqlParams = (searchField, searchCriteria, pageSize, offset)
+            else:
+                sqlParams = (pageSize, offset)
+            fetchObjects_sql + " LIMIT ? OFFSET ?;"
             self.cursor.execute(fetchObjects_sql, sqlParams)
             rows = self.cursor.fetchall()
 

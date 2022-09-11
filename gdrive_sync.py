@@ -1,3 +1,5 @@
+#!/usr/bin/env python3.8
+
 from __future__ import print_function
 from genericpath import isdir, isfile
 from http.client import BAD_REQUEST
@@ -124,6 +126,36 @@ def readFolderCache(folder_path: str) -> List[dict]:
     
     return gFolderObjects
 
+# read the local folder metadata cache into memory
+def read_folder_cache_from_db() -> List[dict]:
+    logging.debug("loading folder cache objects into memory")
+    try:
+        gFolderObjects = []
+
+        while True:
+            files, rowsReturned = DATABASE.fetch_gObjectSet(searchField = "mimeType",\
+                                     searchCriteria="application/vnd.google-apps.folder")
+            if len(files)==0:
+                break
+            for f in files:
+                if (f.properties['ownedByMe'] == True):
+                    gFolderObjects.append(f)
+        
+    except Exception as err:
+        logging.error("failure in loading local folder cache." + str(err))
+        print(str(err))
+
+    rootFolder = list(filter(lambda rf: rf['id'] == ROOT_FOLDER_ID, gFolderObjects))
+    gDriveRoot = gFolder(rootFolder[0])
+
+    for fObj in gFolderObjects:
+        for fSearch in gFolderObjects:
+            if 'parents' in fSearch.properties.keys():
+                if fObj.id in fSearch.properties['parents']:
+                    fObj.add_child(fSearch)
+    
+    return gFolderObjects
+
 def get_google_object(service, id:str):
     return_object = None
     try:
@@ -231,7 +263,7 @@ def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
                     threadSafeDB.open(DATABASE_PATH)
                     
                     futures.append(executor.submit(
-                            downloadFile, service, f, filePath, threadSafeDB
+                            download_file, service, f, filePath, threadSafeDB
                         ))
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -243,7 +275,7 @@ def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
     return bResult
 
 # download a single file (will be called multi-threaded)
-def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store = None):
+def download_file(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store = None):
     logging.debug("beginning to download file %s", file.name)
     sReturn = ""
     try:
@@ -265,7 +297,7 @@ def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store
             f.write(fileData.getbuffer())
 
         file.localPath = targetPath
-        file.md5 = hashFile(targetPath)
+        file.md5 = hash_file(targetPath)
 
         if threadSafeDB is not None:
             threadSafeDB.insert_gObject(file=file)
@@ -286,7 +318,7 @@ def downloadFile(service, file: gFile, targetPath:str, threadSafeDB:sqlite_store
         sReturn = "file %s download failed with %s" % (targetPath, str(err))
     return sReturn
 
-def hashFile(filePath: str):
+def hash_file(filePath: str):
     hash  = hashlib.md5()
     fileBytes  = bytearray(128*1024)
     mv = memoryview(fileBytes)
@@ -296,7 +328,7 @@ def hashFile(filePath: str):
     return hash.hexdigest()
 
 # export a native google document format (can't be downloaded)
-def exportNativeFile(service, file: gFile, targetPath: str)-> bool:
+def export_native_file(service, file: gFile, targetPath: str)-> bool:
     logging.debug("exporting the native google application file %s.", file.name)
     bSuccess = False
     try:
@@ -401,13 +433,13 @@ def get_full_folder_path(service, folder: gFolder)-> str:
     return full_path
 
 # full sync down
-def doFullDownload(service, folder: gFolder, targetPath:str):
+def do_full_download(service, folder: gFolder, targetPath:str):
     logging.debug("starting full download from google drive to %s" % targetPath)
     try:
         downloadFilesFromFolder(service, folder, os.path.join(targetPath))
         if folder.children is not None:
             for child in folder.children:
-                doFullDownload(service, child, os.path.join(targetPath, folder.name))
+                do_full_download(service, child, os.path.join(targetPath, folder.name))
         
     except Exception as err:
         logging.error("error writing local folder cache. %s" % str(err))
@@ -462,7 +494,7 @@ def scan_local_files(parentFolder:str):
             object = os.path.join(parentFolder, object)
             if os.path.isfile(object):
                 # multi-thread this too
-                md5 = hashFile(object)
+                md5 = hash_file(object)
                 DATABASE.insert_localFile(object, md5)
             elif os.path.isdir(object):
                 scan_local_files(os.path.join(object))
@@ -497,25 +529,43 @@ def get_all_drive_files_not_in_db(service) -> List:
             files_page = request.execute()
             fs = files_page.get('files', [])
             for f in fs:
-                googleFile = gFile(f)
                 dbFile = None
-                rows = DATABASE.fetch_gObject(googleFile.id)
+                rows = DATABASE.fetch_gObjects(f['id'])
                 if len(rows) > 0:
                     dbFile = rows[0]
-                if dbFile is not None:
-                    if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
-                        dbFile.mimeType != googleFile.mimeType) and \
-                        dbFile.properties['version'] < googleFile.properties['version']:
+                    
+                if f['mimeType'] == 'application/vnd.google-apps.folder':
+                    googleFolder = gFolder(f)
+                    if dbFile is not None:
+                        if dbFile.id != googleFolder.id and \
+                                    dbFile.name != googleFolder.name:
                             # fetch full metadata of the file
-                            get_params = {"fileId": googleFile.id, "fields": "*"}
+                            get_params = {"fileId": googleFolder.id, "fields": "*"}
                             get_req = gServiceFiles.get(**get_params)
-                            full_file = gFile(get_req.execute())
-                            differences.append(full_file)
+                            full_folder = gFolder(get_req.execute())
+                            differences.append(full_folder)
+                    else:
+                        get_params = {"fileId": googleFolder.id, "fields": "*"}
+                        get_req = gServiceFiles.get(**get_params)
+                        full_folder = gFolder(get_req.execute())
+                        differences.append(full_folder)
+                    
                 else:
-                    get_params = {"fileId": googleFile.id, "fields": "*"}
-                    get_req = gServiceFiles.get(**get_params)
-                    full_file = gFile(get_req.execute())
-                    differences.append(full_file)
+                    googleFile = gFile(f)
+                    if dbFile is not None:
+                        if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
+                            dbFile.mimeType != googleFile.mimeType) and \
+                            dbFile.properties['version'] < googleFile.properties['version']:
+                                # fetch full metadata of the file
+                                get_params = {"fileId": googleFile.id, "fields": "*"}
+                                get_req = gServiceFiles.get(**get_params)
+                                full_file = gFile(get_req.execute())
+                                differences.append(full_file)
+                    else:
+                        get_params = {"fileId": googleFile.id, "fields": "*"}
+                        get_req = gServiceFiles.get(**get_params)
+                        full_file = gFile(get_req.execute())
+                        differences.append(full_file)
             request = gServiceFiles.list_next(request, files_page)
     except HttpError as err:
         logging.error("error scanning google drive files. %s" % str(err))
@@ -548,6 +598,11 @@ def reconcile_local_files_with_db():
 
 def main():
 
+    """
+    ********************************************************************
+    Logging config and setup
+    ********************************************************************
+    """
     # try to initiate logging
     try:
         logDir = os.path.join(os.path.dirname(__file__), LOG_DIRECTORY)
@@ -569,11 +624,27 @@ def main():
         print(str(err))
         raise Exception("unable to initialize logging")
 
+    """
+    ********************************************************************
+    Initialize the local sqlite database.  used as metadata cache
+    - stores file metadata of the stuff on disk
+    ********************************************************************
+    """
     logging.info("initialize local metadata store.")
     global DATABASE
     DATABASE = sqlite_store()
     if not os.path.exists(DATABASE_PATH):
         DATABASE.create_db(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
+
+    
+    """
+    ********************************************************************
+    Connect to Google drive via oauth. 
+    - uses the authorization code flow
+    - stores bearer and refresh token in a json file
+    - supports granting consent to the scopes requested in a browser window (interactive)
+    ********************************************************************
+    """
 
     logging.info("initializing application credentials")
     creds = None
@@ -623,8 +694,9 @@ def main():
     global CREDENTIALS
     CREDENTIALS = creds
 
+    # build the drive API service
     service = build('drive', 'v3', credentials=creds)
-
+    
     #populate root folder objects so that we can map the parents and children
     logging.debug("Fetching the root folder from Google drive.")    
     rootFolder = getRootFolder(service)
@@ -633,15 +705,15 @@ def main():
     global ROOT_FOLDER_OBJECT 
     ROOT_FOLDER_OBJECT = rootFolder
 
-    DATABASE.open(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
-    DATABASE.insert_gObject(folder=rootFolder)
+    DATABASE.open(dbPath=DATABASE_PATH)
+    DATABASE.insert_gObject(folder=rootFolder) # won't insert a dupe
 
 
     #logging.info("clearing the local folder cache")
     #clearFolderCache(FOLDERS_CACHE_PATH)
 
     # fetch all the folders and structure from google drive
-    writeFolderCache(service)
+    # writeFolderCache(service) # only needed on first run to create the local folder tree
 
     # read the local cache and create linked folder tree objects
     folders = readFolderCache(FOLDERS_CACHE_PATH)
@@ -651,22 +723,51 @@ def main():
     copyFolderTree(rootFolder, '/home/ketchup/gdrive')
 
 
+    """
+    ***********************************************************************************
+    Do a full scan of Google drive for any files missing locally
+    - this won't be necessary as we subscribe to the change notifications
+    - only needed when starting up
+    - first we purge any files from the db that aren't on disk
+    - then we fetch the content from google drive and seeing what's not in the database
+    - process the folders first so we have somewhere to download the files
+    - then we process the missing files.
+    ************************************************************************************
+
+    """
     # make sure local database is reconciled with what's on disk
     reconcile_local_files_with_db()
 
     # get google drive changes
     google_drive_changes = get_all_drive_files_not_in_db(service)
 
-    # fetch any missing files
+
     # *** multi-thread this in the future
+
+
+    # run throught the folders first and get those created
+    i = 0 
+    for i in range(len(google_drive_changes)):
+        if google_drive_changes[i].mimeType == 'application/vnd.google-apps.folder':
+            for parent_id in google_drive_changes[i].properties['parents']:
+                parent_folder = get_google_object(service, parent_id)
+                full_path = os.path.join(DRIVE_CACHE_PATH, \
+                        get_full_folder_path(service, parent_folder), \
+                        google_drive_changes[i].name)
+                full_path = os.path.expanduser(full_path)
+                if not os.path.exists(full_path):
+                    os.mkdir(os.path.expanduser(full_path))
+                    DATABASE.insert_gObject(folder = google_drive_changes[i])
+                google_drive_changes.pop(i)
+
+    # get and process the file changes after creating any folders
     for f in google_drive_changes:
-        # get all folder locations (can be multiple)
         if 'vnd.google-apps' not in f.mimeType:
             for parent_id in f.properties['parents']:
                 parent_folder = get_google_object(service, parent_id)
                 full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
                 full_path = os.path.expanduser(full_path)
-                downloadFile(service, f, full_path)
+                download_file(service, f, full_path)
     
 
     # start tracking changes
