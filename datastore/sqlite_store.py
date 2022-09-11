@@ -128,28 +128,28 @@ class sqlite_store:
         gObjects = []
         totalFetched = 0
         try:
-            fetchObjects_sql = "SELECT id, name, mime_type, md5, local_path, properties FROM gOjects "
+            fetchObjects_sql = "SELECT id, name, mime_type, md5, local_path, properties FROM gObjects "
             if searchField is not None and searchCriteria is not None:
-                fetchObjects_sql + "WHERE ? LIKE ? "
-                sqlParams = (searchField, searchCriteria, pageSize, offset)
+                fetchObjects_sql =  fetchObjects_sql + "WHERE " + searchField + " LIKE ? "
+                sqlParams = (searchCriteria, pageSize, offset)
             else:
                 sqlParams = (pageSize, offset)
-            fetchObjects_sql + " LIMIT ? OFFSET ?;"
+            fetchObjects_sql =  fetchObjects_sql + " LIMIT ? OFFSET ?;"
             self.cursor.execute(fetchObjects_sql, sqlParams)
             rows = self.cursor.fetchall()
 
             for row in rows:
                 mimeType = row[2]
                 if "folder" in mimeType:
-                    f = gFolder()
+                    f = gFolder(json.loads(row[5]))
                 else:
-                    f = gFile()
+                    f = gFile(json.loads(row[5]))
                     f.md5 = row[3]
                 f.id = row[0]
                 f.name = row[1]
                 f.mimeType = row[2]
                 f.localPath = row[4]
-                f.properties = row[5]
+                #f.properties = json.loads(row[5])
 
                 gObjects.append(f)
 

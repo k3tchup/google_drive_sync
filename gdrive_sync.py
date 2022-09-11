@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 from genericpath import isdir, isfile
+from glob import glob
 from http.client import BAD_REQUEST
 from multiprocessing.connection import wait
 from typing import List
@@ -131,22 +132,29 @@ def read_folder_cache_from_db() -> List[dict]:
     logging.debug("loading folder cache objects into memory")
     try:
         gFolderObjects = []
-
+        offset = 0
         while True:
-            files, rowsReturned = DATABASE.fetch_gObjectSet(searchField = "mimeType",\
+            files, rowsReturned = DATABASE.fetch_gObjectSet(offset=offset, searchField = "mime_type",\
                                      searchCriteria="application/vnd.google-apps.folder")
-            if len(files)==0:
+            if rowsReturned == 0:
                 break
             for f in files:
-                if (f.properties['ownedByMe'] == True):
+                if "ownedByMe" in f.properties.keys():
+                    if (f.properties['ownedByMe'] == True):
+                        gFolderObjects.append(f)
+                if (f.id == ROOT_FOLDER_ID):
                     gFolderObjects.append(f)
+                    rootFolder = f
+            offset += rowsReturned
         
     except Exception as err:
         logging.error("failure in loading local folder cache." + str(err))
         print(str(err))
 
-    rootFolder = list(filter(lambda rf: rf['id'] == ROOT_FOLDER_ID, gFolderObjects))
-    gDriveRoot = gFolder(rootFolder[0])
+    #rootFolder = list(filter(lambda rf: rf['id'] == ROOT_FOLDER_ID, gFolderObjects))
+    gDriveRoot = rootFolder
+    global ROOT_FOLDER_OBJECT
+    ROOT_FOLDER_OBJECT = rootFolder
 
     for fObj in gFolderObjects:
         for fSearch in gFolderObjects:
@@ -530,7 +538,7 @@ def get_all_drive_files_not_in_db(service) -> List:
             fs = files_page.get('files', [])
             for f in fs:
                 dbFile = None
-                rows = DATABASE.fetch_gObjects(f['id'])
+                rows = DATABASE.fetch_gObject(f['id'])
                 if len(rows) > 0:
                     dbFile = rows[0]
                     
@@ -713,14 +721,16 @@ def main():
     #clearFolderCache(FOLDERS_CACHE_PATH)
 
     # fetch all the folders and structure from google drive
-    # writeFolderCache(service) # only needed on first run to create the local folder tree
+    #writeFolderCache(service) # only needed on first run to create the local folder tree
 
     # read the local cache and create linked folder tree objects
-    folders = readFolderCache(FOLDERS_CACHE_PATH)
-    rootFolder = (list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders)))[0]
-    ROOT_FOLDER_OBJECT = rootFolder
+    # folders = readFolderCache(FOLDERS_CACHE_PATH)
+    folders = read_folder_cache_from_db()
+
+    #rootFolder = (list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders)))[0]
+    #ROOT_FOLDER_OBJECT = rootFolder
     #printFolderTree(folders)
-    copyFolderTree(rootFolder, '/home/ketchup/gdrive')
+    #copyFolderTree(rootFolder, '/home/ketchup/gdrive')
 
 
     """
