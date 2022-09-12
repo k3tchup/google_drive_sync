@@ -62,6 +62,8 @@ CREDENTIALS = None
 DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
 DATABASE = None
 CHANGES_TOKEN = None
+TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
+TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
 
 # Create a new Http() object for every request
 # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
@@ -423,15 +425,24 @@ def get_full_folder_path(service, folder: gFolder)-> str:
     try:
         if 'parents' in folder.properties.keys():   
             gServiceFiles = service.files()
-            params = { "fileId": folder.properties['parents'][0], "fields": "parents, mimeType, id, name"}
+            params = { "fileId": folder.properties['parents'][0], "fields": "parents, mimeType, id, name, ownedByMe"}
             request = gServiceFiles.get(**params)
             parent = request.execute()
             full_path = parent['name'] + "/" + full_path
-            while 'parent' in parent.keys():
-                params = { "fileId": parent['parents'][0], "fields": "parents, mimeType, id, name"}
+            if parent['ownedByMe'] == False:
+                # a folder shared outside of the current owner for the drive object.  
+                # stick in the root folder
+                full_path = ROOT_FOLDER_OBJECT.name + "/" + full_path
+            while 'parents' in parent.keys():
+                params = { "fileId": parent['parents'][0], "fields": "parents, mimeType, id, name, ownedByMe"}
                 request = gServiceFiles.get(**params)
                 parent = request.execute()
                 full_path = parent['name'] + "/" + full_path
+                if parent['ownedByMe'] == False:
+                    # a folder shared outside of the current owner for the drive object.  
+                    # stick in the root folder
+                    full_path = ROOT_FOLDER_OBJECT.name + "/" + full_path
+                    break
                 
         
     except Exception as err:
@@ -523,7 +534,7 @@ def get_all_drive_files_not_in_db(service) -> List:
     # important: if the file in google drive is a later version, it's authoritative
     # this will be the changes from the side of google drive
     
-    logging.info("scanning google drive files, looking for changes")
+    logging.info("scanning google drive files, looking for files not in database")
     differences = []
     try:
         gServiceFiles = service.files()
@@ -542,7 +553,7 @@ def get_all_drive_files_not_in_db(service) -> List:
                 if len(rows) > 0:
                     dbFile = rows[0]
                     
-                if f['mimeType'] == 'application/vnd.google-apps.folder':
+                if f['mimeType'] == TYPE_GOOGLE_FOLDER:
                     googleFolder = gFolder(f)
                     if dbFile is not None:
                         if dbFile.id != googleFolder.id and \
@@ -570,10 +581,11 @@ def get_all_drive_files_not_in_db(service) -> List:
                                 full_file = gFile(get_req.execute())
                                 differences.append(full_file)
                     else:
-                        get_params = {"fileId": googleFile.id, "fields": "*"}
-                        get_req = gServiceFiles.get(**get_params)
-                        full_file = gFile(get_req.execute())
-                        differences.append(full_file)
+                        if TYPE_GOOGLE_APPS not in googleFile.mimeType:
+                            get_params = {"fileId": googleFile.id, "fields": "*"}
+                            get_req = gServiceFiles.get(**get_params)
+                            full_file = gFile(get_req.execute())
+                            differences.append(full_file)
             request = gServiceFiles.list_next(request, files_page)
     except HttpError as err:
         logging.error("error scanning google drive files. %s" % str(err))
@@ -597,7 +609,7 @@ def reconcile_local_files_with_db():
     scan_local_files(localDrivePath)
 
     # any files that are in the db but not on disk, purge the db records
-    logging.info("deleting database entries where file isn't on disk")
+    logging.info("purging database entries where objects aren't foudn on disk")
     DATABASE.delete_files_not_on_disk()
 
     return
@@ -620,7 +632,7 @@ def main():
         logParams = {
             "filename": logFile,
             "filemode": 'w',
-            "format": '%(asctime)s: %(name)s - %(levelname)s - %(message)s',
+            "format": '%(asctime)s: %(name)s - %(levelname)s -[%(filename)s:%(lineno)s - %(funcName)s() ] - %(message)s',
             "datefmt": '%d-%b-%y %H:%M:%S',
             "level": logging.DEBUG
         }
@@ -727,6 +739,7 @@ def main():
     # folders = readFolderCache(FOLDERS_CACHE_PATH)
     folders = read_folder_cache_from_db()
 
+
     #rootFolder = (list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders)))[0]
     #ROOT_FOLDER_OBJECT = rootFolder
     #printFolderTree(folders)
@@ -749,6 +762,8 @@ def main():
     reconcile_local_files_with_db()
 
     # get google drive changes
+    # this is a full scan which should only be run upon the initial start up. 
+    # once the program is running, it will subscribe to change notifications  
     google_drive_changes = get_all_drive_files_not_in_db(service)
 
 
@@ -772,13 +787,22 @@ def main():
 
     # get and process the file changes after creating any folders
     for f in google_drive_changes:
-        if 'vnd.google-apps' not in f.mimeType:
+        if TYPE_GOOGLE_APPS not in f.mimeType:
+            if 'parents' not in f.properties.keys():
+                f.properties['parents'] = (ROOT_FOLDER_ID, )
             for parent_id in f.properties['parents']:
                 parent_folder = get_google_object(service, parent_id)
                 full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
                 full_path = os.path.expanduser(full_path)
+                if not os.path.exists(os.path.dirname(full_path)):
+                    # need to make directories if we don't own the folders
+                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
                 download_file(service, f, full_path)
     
+    # ******
+    # ^^^^
+    # there are some weird change sets things happening with the above.  need to figure out how filter those out or merge them
+    # ******
 
     # start tracking changes
     global CHANGES_TOKEN
