@@ -21,6 +21,8 @@ https://www.googleapis.com/auth/activity
   * full sync down to local from Google drive
   * export of native Google Apps files, like Docs and Sheets.
 * Sqlite database for metadata data storage 
+* Handle incremental changes by subscribing to Google Drive change tokens
+* Fetches files not owned by the Drive owner into a separate local folder
 
 ## To-do (work in progress)
 
@@ -69,9 +71,11 @@ https://www.googleapis.com/auth/activity
 
 [ ] delete files remotely
 
-[ ] version handling so we don't transfer files we don't need to.   there are version numbers in the metadata
+[x] version handling so we don't transfer files we don't need to.   there are version numbers in the metadata
 
-[ ] subscribe to change notifications provided by Google drive
+[x] subscribe to change notifications provided by Google drive
+
+[ ] figure out why there are duplicate files with the same name and hash.  something to do with change sets.
 
 [x] logging 
 - will need some improvement as we get going
