@@ -5,6 +5,7 @@ from genericpath import isdir, isfile
 from glob import glob
 from http.client import BAD_REQUEST
 from multiprocessing.connection import wait
+from time import sleep
 from typing import List
 import json
 import io
@@ -429,20 +430,19 @@ def get_full_folder_path(service, folder: gFolder)-> str:
             request = gServiceFiles.get(**params)
             parent = request.execute()
             full_path = parent['name'] + "/" + full_path
-            if parent['ownedByMe'] == False:
-                # a folder shared outside of the current owner for the drive object.  
-                # stick in the root folder
-                full_path = ROOT_FOLDER_OBJECT.name + "/" + full_path
             while 'parents' in parent.keys():
                 params = { "fileId": parent['parents'][0], "fields": "parents, mimeType, id, name, ownedByMe"}
                 request = gServiceFiles.get(**params)
                 parent = request.execute()
                 full_path = parent['name'] + "/" + full_path
-                if parent['ownedByMe'] == False:
-                    # a folder shared outside of the current owner for the drive object.  
-                    # stick in the root folder
-                    full_path = ROOT_FOLDER_OBJECT.name + "/" + full_path
-                    break
+            if parent['ownedByMe'] == False:
+                # a folder shared outside of the current owner for the drive object.  
+                # stick in the root folder
+                full_path = "_shared_withme/" + full_path
+   
+        else:
+            if folder.properties['ownedByMe'] == False:
+                full_path = "_shared_withme/" + full_path
                 
         
     except Exception as err:
@@ -598,7 +598,7 @@ def get_all_drive_files_not_in_db(service) -> List:
 
 # identify database entries of files not matching what's on disk.  delete the db entries.
 def reconcile_local_files_with_db():
-    localDrivePath = os.path.join(os.path.expanduser(DRIVE_CACHE_PATH), ROOT_FOLDER_OBJECT.name)
+    localDrivePath = os.path.expanduser(DRIVE_CACHE_PATH)
 
     # loop through files on disk and find any that aren't in the db or different by hash
     # hash the local files and stick them into a temp table along with the md5 hash
@@ -636,7 +636,6 @@ def main():
             "datefmt": '%d-%b-%y %H:%M:%S',
             "level": logging.DEBUG
         }
-        #logging.basicConfig(filename=logFile, filemode='w', format='%(name)s - %(levelname)s - %(message)s', level=logging.DEBUG)
         logging.basicConfig(**logParams)
         logging.info("Starting sync")
 
@@ -764,40 +763,42 @@ def main():
     # get google drive changes
     # this is a full scan which should only be run upon the initial start up. 
     # once the program is running, it will subscribe to change notifications  
-    google_drive_changes = get_all_drive_files_not_in_db(service)
+    google_drive_changes = []
+    #google_drive_changes = get_all_drive_files_not_in_db(service)
 
 
     # *** multi-thread this in the future
 
 
     # run throught the folders first and get those created
-    i = 0 
-    for i in range(len(google_drive_changes)):
-        if google_drive_changes[i].mimeType == 'application/vnd.google-apps.folder':
-            for parent_id in google_drive_changes[i].properties['parents']:
-                parent_folder = get_google_object(service, parent_id)
-                full_path = os.path.join(DRIVE_CACHE_PATH, \
-                        get_full_folder_path(service, parent_folder), \
-                        google_drive_changes[i].name)
-                full_path = os.path.expanduser(full_path)
-                if not os.path.exists(full_path):
-                    os.mkdir(os.path.expanduser(full_path))
-                    DATABASE.insert_gObject(folder = google_drive_changes[i])
-                google_drive_changes.pop(i)
+    if len(google_drive_changes) > 0:
+        i = 0 
+        for i in range(len(google_drive_changes)):
+            if google_drive_changes[i].mimeType == 'application/vnd.google-apps.folder':
+                for parent_id in google_drive_changes[i].properties['parents']:
+                    parent_folder = get_google_object(service, parent_id)
+                    full_path = os.path.join(DRIVE_CACHE_PATH, \
+                            get_full_folder_path(service, parent_folder), \
+                            google_drive_changes[i].name)
+                    full_path = os.path.expanduser(full_path)
+                    if not os.path.exists(full_path):
+                        os.mkdir(os.path.expanduser(full_path))
+                        DATABASE.insert_gObject(folder = google_drive_changes[i])
+                    google_drive_changes.pop(i)
 
-    # get and process the file changes after creating any folders
-    for f in google_drive_changes:
-        if TYPE_GOOGLE_APPS not in f.mimeType:
-            if 'parents' not in f.properties.keys():
-                f.properties['parents'] = (ROOT_FOLDER_ID, )
-            for parent_id in f.properties['parents']:
-                parent_folder = get_google_object(service, parent_id)
-                full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
-                full_path = os.path.expanduser(full_path)
-                if not os.path.exists(os.path.dirname(full_path)):
-                    # need to make directories if we don't own the folders
-                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                download_file(service, f, full_path)
+        # get and process the file changes after creating any folders
+        for f in google_drive_changes:
+            if TYPE_GOOGLE_APPS not in f.mimeType:
+                if 'parents' not in f.properties.keys():
+                    f.properties['parents'] = (ROOT_FOLDER_ID, )
+                for parent_id in f.properties['parents']:
+                    parent_folder = get_google_object(service, parent_id)
+                    full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
+                    full_path = os.path.expanduser(full_path)
+                    if not os.path.exists(os.path.dirname(full_path)):
+                        # need to make directories if we don't own the folders
+                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                    download_file(service, f, full_path)
     
     # ******
     # ^^^^
@@ -806,8 +807,62 @@ def main():
 
     # start tracking changes
     global CHANGES_TOKEN
+    logging.debug("fetching change token from google drive")
     CHANGES_TOKEN = get_drive_changes_token(service)
-    changes = get_drive_changes(service, CHANGES_TOKEN)
+
+    
+    # need start this in a separate worker thread i think.   
+    try:
+        while True:
+            try:
+                changes = get_drive_changes(service, CHANGES_TOKEN)
+                logging.debug("retrieved %d changes from google drive" % len(changes))
+                # process the folders first
+                i = 0 
+                for i in range(len(changes)):
+                    full_path = ""
+                    if changes[i]['removed'] == False:
+                        if changes[i]['file']['mimeType'] == TYPE_GOOGLE_FOLDER:
+                            folder = get_google_object(service, changes[i]['fileId']) 
+                            if 'parents' in folder.properties.keys():
+                                for parent_id in folder.properties['parents']:
+                                    parent_folder = get_google_object(service, parent_id)
+                                    full_path = os.path.join(DRIVE_CACHE_PATH, \
+                                        get_full_folder_path(service, parent_folder), \
+                                        folder.name)
+                                    full_path = os.path.expanduser(full_path)
+                                    if not os.path.exists(full_path):
+                                        os.mkdir(os.path.expanduser(full_path))
+                                        DATABASE.insert_gObject(folder = folder)
+                            changes.pop(i)
+                    else:
+                        # handle removal of files and folders later
+                        return
+                    
+                for change in changes:
+                    if not change['removed'] == True:
+                        if TYPE_GOOGLE_APPS not in change['file']['mimeType']:
+                            file = get_google_object(service, changes[i]['fileId']) 
+                            if 'parents' not in file.properties.keys():                    
+                                file.properties['parents'] = (ROOT_FOLDER_ID, )
+                            for parent_id in file.properties['parents']:
+                                parent_folder = get_google_object(service, parent_id)
+                                full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), file.name)
+                                full_path = os.path.expanduser(full_path)
+                                if not os.path.exists(os.path.dirname(full_path)):
+                                    # need to make directories if we don't own the folders
+                                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                                download_file(service, file, full_path)
+
+                    else:
+                        # handle removes later
+                        return
+                
+            except Exception as err:
+                logging.error("error parsing change set. %s" % str(err))
+            sleep(5)
+    except KeyboardInterrupt:
+        pass
 
 
     # max threads
