@@ -5,6 +5,7 @@ from genericpath import isdir, isfile
 from glob import glob
 from http.client import BAD_REQUEST
 from multiprocessing.connection import wait
+import py_compile
 from time import sleep
 from typing import List
 import json
@@ -31,7 +32,20 @@ from googleapiclient import discovery
 # application imports
 from gDrive_data_structures.data_types import *
 from datastore.sqlite_store import *
+from config import config as cfg
 
+# global variables
+ROOT_FOLDER_ID = ""
+ROOT_FOLDER_OBJECT = None
+MAX_THREADS = 1
+CREDENTIALS = None
+DATABASE = None
+CHANGES_TOKEN = None
+TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
+TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
+
+
+'''
 # global variables
 TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
 APP_CREDS = '/home/ketchup/vscode/gdrive_client/credentials.json'
@@ -56,15 +70,7 @@ MEDIA_EXPORT_MATRIX = {
                     "extension": ".xslx"
             }
 }
-ROOT_FOLDER_ID = ""
-ROOT_FOLDER_OBJECT = None
-MAX_THREADS = 1
-CREDENTIALS = None
-DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
-DATABASE = None
-CHANGES_TOKEN = None
-TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
-TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
+'''
 
 # Create a new Http() object for every request
 # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
@@ -74,7 +80,7 @@ def build_request(http, *args, **kwargs):
     return googleapiclient.http.HttpRequest(new_http, *args, **kwargs)
 
 # get the root folder
-def getRootFolder(service) -> gFolder:
+def get_root_folder(service) -> gFolder:
     logging.debug("fetching the root folder")
     rootFolder = None
     try:
@@ -90,7 +96,7 @@ def getRootFolder(service) -> gFolder:
     return rootFolder
 
 # clear the local folder cache
-def clearFolderCache(folder_path: str) -> bool:
+def clear_folder_cache(folder_path: str) -> bool:
     logging.debug("clearning the local folder cache")
     try:
         for f in os.listdir(folder_path):
@@ -101,7 +107,7 @@ def clearFolderCache(folder_path: str) -> bool:
         return False
 
 # read the local folder metadata cache into memory
-def readFolderCache(folder_path: str) -> List[dict]:
+def read_folder_cache(folder_path: str) -> List[dict]:
     logging.debug("loading local folder cache data into memory")
     try:
         driveFolders = []
@@ -192,7 +198,7 @@ def get_google_object(service, id:str):
     
 
 # print out the google drive folder tree (won't be used in production)
-def printFolderTree(folders = None):
+def print_folder_tree(folders = None):
     # grab the root folder
     rootFolder = list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders))
     #print(rootFolder[0]['name'])
@@ -207,7 +213,7 @@ def printFolderTree(folders = None):
     return
 
 # duplicate google drive directory structure to the local target directory
-def copyFolderTree(rootFolder:gFolder, destPath:str):
+def copy_folder_tree(rootFolder:gFolder, destPath:str):
     logging.debug("creating a copy of the remote folder '%s' locally.", rootFolder.name)
     if rootFolder is not None:
         try:
@@ -215,7 +221,7 @@ def copyFolderTree(rootFolder:gFolder, destPath:str):
                 os.mkdir(os.path.join(destPath, rootFolder.name))
             if rootFolder.children is not None:
                 for child in rootFolder.children:
-                    copyFolderTree(child, os.path.join(destPath, rootFolder.name))
+                    copy_folder_tree(child, os.path.join(destPath, rootFolder.name))
         except Exception as err:
             logging.error("failure to copy folder tree." + str(err))
             print(err)
@@ -223,15 +229,15 @@ def copyFolderTree(rootFolder:gFolder, destPath:str):
         return
 
 # return a listing of files in a directory (non-recursive)
-def listFileInDirectory(service, folder:gFolder, maxFiles = 1000) -> List[gFile]:
+def list_files_in_dir(service, folder:gFolder, maxFiles = 1000) -> List[gFile]:
     logging.debug("listing files in %s directory", folder.name)
     files = []
     try:
         gServiceFiles = service.files()
         params = { "q": "mimeType!='application/vnd.google-apps.folder' and '" +
                     folder.id + "' in parents",
-                    "pageSize": PAGE_SIZE, 
-                    "fields": "nextPageToken," + FILE_FIELDS
+                    "pageSize": cfg.PAGE_SIZE, 
+                    "fields": "nextPageToken," + cfg.FILE_FIELDS
         }
         request = gServiceFiles.list(**params)
 
@@ -250,11 +256,11 @@ def listFileInDirectory(service, folder:gFolder, maxFiles = 1000) -> List[gFile]
     return files
 
 # download all files in a folder (non-recursive)
-def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
+def download_files_from_folder(service, folder: gFolder, targetDir: str) -> bool:
     logging.debug("starting to download files from %s to %s" % (folder.name, targetDir))
     bResult = False
     try:
-        files = listFileInDirectory(service, folder)
+        files = list_files_in_dir(service, folder)
 
         # the google api module isn't thread safe, since it's based on http2 which also isn't thread safe
         # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
@@ -265,13 +271,13 @@ def downloadFilesFromFolder(service, folder: gFolder, targetDir: str) -> bool:
                     filePath = os.path.join(targetDir, folder.name, f.name)
 
                     # build a new http2 object to enable thread safety.  gets passed to each thread   
-                    credentials = Credentials.from_authorized_user_file(TOKEN_CACHE, TARGET_SCOPES)
+                    credentials = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
                     authorized_http = google_auth_httplib2.AuthorizedHttp(credentials, http=httplib2.Http())
                     service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
 
                     # build new database object for multi-threading too
                     threadSafeDB = sqlite_store()
-                    threadSafeDB.open(DATABASE_PATH)
+                    threadSafeDB.open(cfg.DATABASE_PATH)
                     
                     futures.append(executor.submit(
                             download_file, service, f, filePath, threadSafeDB
@@ -346,9 +352,9 @@ def export_native_file(service, file: gFile, targetPath: str)-> bool:
         gServiceFiles = service.files()
         # get type of application
         targetMimeType = None
-        if file.properties['mimeType'] in MEDIA_EXPORT_MATRIX.keys():
-            targetMimeType = MEDIA_EXPORT_MATRIX[file.properties['mimeType']]["targetMimeType"]
-            targetExtension = MEDIA_EXPORT_MATRIX[file.properties['mimeType']]["extension"]
+        if file.properties['mimeType'] in cfg.MEDIA_EXPORT_MATRIX.keys():
+            targetMimeType = cfg.MEDIA_EXPORT_MATRIX[file.properties['mimeType']]["targetMimeType"]
+            targetExtension = cfg.MEDIA_EXPORT_MATRIX[file.properties['mimeType']]["extension"]
             targetPath = targetPath + targetExtension
         if targetMimeType is None:
             return False
@@ -372,7 +378,7 @@ def export_native_file(service, file: gFile, targetPath: str)-> bool:
         bSuccess = False
     return bSuccess
 
-def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
+def write_folder_cache(service, localCachePath:str = cfg.FOLDERS_CACHE_PATH):
     logging.debug("writing local folder cache to %s." % str(localCachePath))
     try:
         # get the root folder
@@ -384,7 +390,7 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
         else:
             rootFolder = ROOT_FOLDER_OBJECT.properties
         
-        fRootFolder = open(FOLDERS_CACHE_PATH + "_root", "w+")
+        fRootFolder = open(cfg.FOLDERS_CACHE_PATH + "_root", "w+")
         fRootFolder.write(json.dumps(rootFolder, indent = 4))
         fRootFolder.close()
         
@@ -396,8 +402,8 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
         
         pageToken = None
         params = { "q": "mimeType='application/vnd.google-apps.folder'",
-                    "pageSize": PAGE_SIZE, 
-                    "fields": "nextPageToken," + FOLDER_FIELDS
+                    "pageSize": cfg.PAGE_SIZE, 
+                    "fields": "nextPageToken," + cf.FOLDER_FIELDS
         }
         request = gServiceFiles.list(**params)
 
@@ -406,7 +412,7 @@ def writeFolderCache(service, localCachePath:str = FOLDERS_CACHE_PATH):
             fs = files_page.get('files', [])
             for f in fs:
                 #print(f)
-                with open(FOLDERS_CACHE_PATH + f['id'], 'w+') as folder_data:
+                with open(cfg.FOLDERS_CACHE_PATH + f['id'], 'w+') as folder_data:
                     folderObj = gFolder(f)
                     DATABASE.insert_gObject(folder=folderObj)
                     if 'parents' in folderObj.properties.keys():
@@ -455,7 +461,7 @@ def get_full_folder_path(service, folder: gFolder)-> str:
 def do_full_download(service, folder: gFolder, targetPath:str):
     logging.debug("starting full download from google drive to %s" % targetPath)
     try:
-        downloadFilesFromFolder(service, folder, os.path.join(targetPath))
+        download_files_from_folder(service, folder, os.path.join(targetPath))
         if folder.children is not None:
             for child in folder.children:
                 do_full_download(service, child, os.path.join(targetPath, folder.name))
@@ -539,7 +545,7 @@ def get_all_drive_files_not_in_db(service) -> List:
     try:
         gServiceFiles = service.files()
         params = { "q": "'me' in owners",
-                    "pageSize": PAGE_SIZE, 
+                    "pageSize": cfg.PAGE_SIZE, 
                     "fields": "nextPageToken," + "files(id, name, mimeType, version, md5Checksum, parents, ownedByMe)"
         }
         request = gServiceFiles.list(**params)
@@ -598,7 +604,7 @@ def get_all_drive_files_not_in_db(service) -> List:
 
 # identify database entries of files not matching what's on disk.  delete the db entries.
 def reconcile_local_files_with_db():
-    localDrivePath = os.path.expanduser(DRIVE_CACHE_PATH)
+    localDrivePath = os.path.expanduser(cfg.DRIVE_CACHE_PATH)
 
     # loop through files on disk and find any that aren't in the db or different by hash
     # hash the local files and stick them into a temp table along with the md5 hash
@@ -625,7 +631,7 @@ def main():
     """
     # try to initiate logging
     try:
-        logDir = os.path.join(os.path.dirname(__file__), LOG_DIRECTORY)
+        logDir = os.path.join(os.path.dirname(__file__), cfg.LOG_DIRECTORY)
         logFile = os.path.join(logDir, 'sync.log')
         if not os.path.exists(logDir):
             os.mkdir(logDir)
@@ -652,7 +658,7 @@ def main():
     logging.info("initialize local metadata store.")
     global DATABASE
     DATABASE = sqlite_store()
-    if not os.path.exists(DATABASE_PATH):
+    if not os.path.exists(cfg.DATABASE_PATH):
         DATABASE.create_db(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
 
     
@@ -670,15 +676,15 @@ def main():
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
-    logging.debug("looking for the an existing token in" + TOKEN_CACHE)
-    if os.path.exists(TOKEN_CACHE):
-        creds = Credentials.from_authorized_user_file(TOKEN_CACHE, TARGET_SCOPES)
-        with open(TOKEN_CACHE, 'r') as tokenFile:
+    logging.debug("looking for the an existing token in" + cfg.TOKEN_CACHE)
+    if os.path.exists(cfg.TOKEN_CACHE):
+        creds = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
+        with open(cfg.TOKEN_CACHE, 'r') as tokenFile:
             token = json.loads(tokenFile.read())
-            if token['scopes'] != TARGET_SCOPES:
+            if token['scopes'] != cfg.TARGET_SCOPES:
                 logging.warning("token cache scopes are not valid, removing token")
                 creds = None
-                os.remove(TOKEN_CACHE)
+                os.remove(cfg.TOKEN_CACHE)
             '''
             # not the actual refresh token expiration.  how do we get that?   
             tokenExpires = datetime.strptime(token['expiry'], "%Y-%m-%dT%H:%M:%S.%fZ")
@@ -688,6 +694,10 @@ def main():
                 creds = None
                 os.remove(TOKEN_CACHE)
             '''
+    # max threads
+    global MAX_THREADS
+    MAX_THREADS = os.cpu_count() - 1
+    logging.info("initializing %d threads", MAX_THREADS)
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -700,11 +710,11 @@ def main():
                     logging.error("error logging in to google drive. %s" % str(err))
                     print(err)                
             else:
-                flow = InstalledAppFlow.from_client_secrets_file(APP_CREDS, TARGET_SCOPES)
+                flow = InstalledAppFlow.from_client_secrets_file(cfg.APP_CREDS, cfg.TARGET_SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open(TOKEN_CACHE, 'w+') as token:
-                logging.debug("saving credentials to " + TOKEN_CACHE)
+            with open(cfg.TOKEN_CACHE, 'w+') as token:
+                logging.debug("saving credentials to " + cfg.TOKEN_CACHE)
                 token.write(creds.to_json())
         except HttpError as err:
             print(err)
@@ -718,13 +728,13 @@ def main():
     
     #populate root folder objects so that we can map the parents and children
     logging.debug("Fetching the root folder from Google drive.")    
-    rootFolder = getRootFolder(service)
+    rootFolder = get_root_folder(service)
     global ROOT_FOLDER_ID 
     ROOT_FOLDER_ID = rootFolder.id
     global ROOT_FOLDER_OBJECT 
     ROOT_FOLDER_OBJECT = rootFolder
 
-    DATABASE.open(dbPath=DATABASE_PATH)
+    DATABASE.open(dbPath=cfg.DATABASE_PATH)
     DATABASE.insert_gObject(folder=rootFolder) # won't insert a dupe
 
 
@@ -764,7 +774,7 @@ def main():
     # this is a full scan which should only be run upon the initial start up. 
     # once the program is running, it will subscribe to change notifications  
     google_drive_changes = []
-    #google_drive_changes = get_all_drive_files_not_in_db(service)
+    google_drive_changes = get_all_drive_files_not_in_db(service)
 
 
     # *** multi-thread this in the future
@@ -772,19 +782,20 @@ def main():
 
     # run throught the folders first and get those created
     if len(google_drive_changes) > 0:
-        i = 0 
-        for i in range(len(google_drive_changes)):
+        i = len(google_drive_changes) - 1
+        for i in reversed(range(len(google_drive_changes))):
             if google_drive_changes[i].mimeType == 'application/vnd.google-apps.folder':
                 for parent_id in google_drive_changes[i].properties['parents']:
                     parent_folder = get_google_object(service, parent_id)
-                    full_path = os.path.join(DRIVE_CACHE_PATH, \
+                    full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                             get_full_folder_path(service, parent_folder), \
                             google_drive_changes[i].name)
                     full_path = os.path.expanduser(full_path)
                     if not os.path.exists(full_path):
                         os.mkdir(os.path.expanduser(full_path))
                         DATABASE.insert_gObject(folder = google_drive_changes[i])
-                    google_drive_changes.pop(i)
+                google_drive_changes.pop(i)
+                i-=1 # to avoid array index issues
 
         # get and process the file changes after creating any folders
         for f in google_drive_changes:
@@ -793,7 +804,7 @@ def main():
                     f.properties['parents'] = (ROOT_FOLDER_ID, )
                 for parent_id in f.properties['parents']:
                     parent_folder = get_google_object(service, parent_id)
-                    full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
+                    full_path = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), f.name)
                     full_path = os.path.expanduser(full_path)
                     if not os.path.exists(os.path.dirname(full_path)):
                         # need to make directories if we don't own the folders
@@ -812,6 +823,8 @@ def main():
 
     
     # need start this in a separate worker thread i think.   
+    print("initial sync complete watching for Google drive changes")
+    logging.info("initial sync complete. watching for Google drive changes.")
     try:
         while True:
             try:
@@ -827,7 +840,7 @@ def main():
                             if 'parents' in folder.properties.keys():
                                 for parent_id in folder.properties['parents']:
                                     parent_folder = get_google_object(service, parent_id)
-                                    full_path = os.path.join(DRIVE_CACHE_PATH, \
+                                    full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                         get_full_folder_path(service, parent_folder), \
                                         folder.name)
                                     full_path = os.path.expanduser(full_path)
@@ -847,7 +860,7 @@ def main():
                                 file.properties['parents'] = (ROOT_FOLDER_ID, )
                             for parent_id in file.properties['parents']:
                                 parent_folder = get_google_object(service, parent_id)
-                                full_path = os.path.join(DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), file.name)
+                                full_path = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), file.name)
                                 full_path = os.path.expanduser(full_path)
                                 if not os.path.exists(os.path.dirname(full_path)):
                                     # need to make directories if we don't own the folders
@@ -863,12 +876,6 @@ def main():
             sleep(5)
     except KeyboardInterrupt:
         pass
-
-
-    # max threads
-    global MAX_THREADS
-    MAX_THREADS = os.cpu_count() - 1
-    logging.info("initializing %d threads", MAX_THREADS)
 
 
     #downloadFilesFromFolder(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')

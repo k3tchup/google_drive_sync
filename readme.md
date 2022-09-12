@@ -82,7 +82,7 @@ https://www.googleapis.com/auth/activity
 
 [ ] better error handling
 
-[ ] settings managed in a json file
+[x] settings managed in a config file
 
 [ ] bandwidth management
 - the google modules call http2 classes.  can we just set limits there?
