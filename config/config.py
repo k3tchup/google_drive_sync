@@ -5,6 +5,11 @@
 
 #import preprocessing
 
+import logging
+
+
+LOG_LEVEL = logging.DEBUG
+CONSOLE_LOG_LEVEL = logging.INFO
 TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
 APP_CREDS = '/home/ketchup/vscode/gdrive_client/credentials.json'
 LPORT = 34888

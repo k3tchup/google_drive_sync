@@ -29,6 +29,7 @@ import google_auth_httplib2
 import httplib2
 from googleapiclient import discovery
 
+
 # application imports
 from gDrive_data_structures.data_types import *
 from datastore.sqlite_store import *
@@ -43,34 +44,6 @@ DATABASE = None
 CHANGES_TOKEN = None
 TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
 TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
-
-
-'''
-# global variables
-TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
-APP_CREDS = '/home/ketchup/vscode/gdrive_client/credentials.json'
-LPORT = 34888
-FOLDERS_CACHE_PATH = '/home/ketchup/vscode/gdrive_client/folders/'
-DRIVE_CACHE_PATH = "~/gdrive/"
-PAGE_SIZE = 50
-FOLDER_FIELDS = 'files(*)'
-FILE_FIELDS = 'files(*)'
-EXPORT_NATIVE_DOCS = False
-LOG_DIRECTORY = "log/"
-TARGET_SCOPES = ["https://www.googleapis.com/auth/docs",
-            "https://www.googleapis.com/auth/drive", 
-            "https://www.googleapis.com/auth/activity"]
-MEDIA_EXPORT_MATRIX = {
-            "application/vnd.google-apps.document": { 
-                    "targetMimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",    
-                    "extension": ".docx"
-            },   
-            "application/vnd.google-apps.spreadsheet": {
-                    "targetMimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "extension": ".xslx"
-            }
-}
-'''
 
 # Create a new Http() object for every request
 # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
@@ -304,7 +277,8 @@ def download_file(service, file: gFile, targetPath:str, threadSafeDB:sqlite_stor
         fileData = io.BytesIO()
         downloader = MediaIoBaseDownload(fileData, request)
         done = False
-        print("downloading file %s." % targetPath)
+        logging.info("downloading file %s." % targetPath)
+        #print("downloading file %s." % targetPath)
 
         while done is False:
             status, done = downloader.next_chunk()
@@ -615,8 +589,41 @@ def reconcile_local_files_with_db():
     scan_local_files(localDrivePath)
 
     # any files that are in the db but not on disk, purge the db records
-    logging.info("purging database entries where objects aren't foudn on disk")
+    # don't delete files that are marked as trashed, otherwise we'll download them again
+    logging.info("purging database entries where objects aren't found on disk")
     DATABASE.delete_files_not_on_disk()
+
+    # delete any files marked as 'trashed' in the db from disk
+    logging.info("deleting local files that have been marked as trashed.")
+    toCount = 0
+    while True:
+        trashedObjects, toCount = DATABASE.fetch_deletedObjects(offset=toCount)
+        for file in trashedObjects:
+            if file.mimeType != TYPE_GOOGLE_FOLDER and TYPE_GOOGLE_APPS not in file.mimeType:
+                logging.info("removing trashed file '%s' from local filesystem." % file.localPath)
+                try:
+                    if os.path.exists(file.localPath):
+                        os.remove(file.localPath)
+                except Exception as err:
+                    logging.error("error removing trashed file %s. %s" % (file.localPath, str(err)))
+            elif TYPE_GOOGLE_APPS in file.mimeType:
+                logging.debug("ignoring google apps native doc with id %s" % file.id)
+        # try to remove the directories (should be empty)
+        for file in trashedObjects:
+            if file.mimeType == TYPE_GOOGLE_FOLDER:
+                logging.info("removing trashed folder '%s' from local filesystem." % file.localPath)
+                try:
+                    if os.path.exists(file.localPath):
+                        if (len(os.listdir(file.localPath) == 0)):
+                            os.rmdir(file.localPath)
+                        else:
+                            logging.warning("folder %s isn't empty, skipping." % file.localPath)
+                except Exception as err:
+                    logging.error("error removing trashed folder %s. %s" % (file.localPath, str(err)))
+        if toCount == 0:
+            break
+    
+    # to do 
 
     return
 
@@ -635,15 +642,36 @@ def main():
         logFile = os.path.join(logDir, 'sync.log')
         if not os.path.exists(logDir):
             os.mkdir(logDir)
+        
+        '''
         logParams = {
             "filename": logFile,
             "filemode": 'w',
             "format": '%(asctime)s: %(name)s - %(levelname)s -[%(filename)s:%(lineno)s - %(funcName)s() ] - %(message)s',
             "datefmt": '%d-%b-%y %H:%M:%S',
-            "level": logging.DEBUG
+            "level": cfg.LOG_LEVEL
         }
         logging.basicConfig(**logParams)
-        logging.info("Starting sync")
+        logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+        '''
+
+        logFormatter = logging.Formatter("%(asctime)s: %(name)s - %(levelname)s -[%(filename)s:%(lineno)s - %(funcName)s() ] - %(message)s")
+        logFormatter.datefmt = '%d-%b-%y %H:%M:%S'
+
+        rootLogger = logging.getLogger()
+
+        fileHandler = logging.FileHandler(logFile)
+        fileHandler.setFormatter(logFormatter)
+        rootLogger.addHandler(fileHandler)
+        rootLogger.level = cfg.LOG_LEVEL
+
+        consoleLogFormatter = logging.Formatter("%(asctime)s: %(levelname)s - %(message)s")
+        consoleHandler = logging.StreamHandler()
+        consoleHandler.setFormatter(consoleLogFormatter)
+        consoleHandler.level = cfg.CONSOLE_LOG_LEVEL
+        rootLogger.addHandler(consoleHandler)
+
+        logging.info("Starting Google Drive sync")
 
     except Exception as err:
         print(str(err))
@@ -745,15 +773,7 @@ def main():
     #writeFolderCache(service) # only needed on first run to create the local folder tree
 
     # read the local cache and create linked folder tree objects
-    # folders = readFolderCache(FOLDERS_CACHE_PATH)
     folders = read_folder_cache_from_db()
-
-
-    #rootFolder = (list(filter(lambda rf: rf.id == ROOT_FOLDER_ID, folders)))[0]
-    #ROOT_FOLDER_OBJECT = rootFolder
-    #printFolderTree(folders)
-    #copyFolderTree(rootFolder, '/home/ketchup/gdrive')
-
 
     """
     ***********************************************************************************
@@ -767,6 +787,7 @@ def main():
     ************************************************************************************
 
     """
+    logging.info("looking for files changed since the last startup. this might take a bit of time.")
     # make sure local database is reconciled with what's on disk
     reconcile_local_files_with_db()
 
@@ -779,7 +800,7 @@ def main():
 
     # *** multi-thread this in the future
 
-
+    logging.info("identified %d changes since the last run, reconciling." % len(google_drive_changes))
     # run throught the folders first and get those created
     if len(google_drive_changes) > 0:
         i = len(google_drive_changes) - 1
@@ -795,7 +816,7 @@ def main():
                         os.mkdir(os.path.expanduser(full_path))
                         DATABASE.insert_gObject(folder = google_drive_changes[i])
                 google_drive_changes.pop(i)
-                i-=1 # to avoid array index issues
+                #i-=1 # to avoid array index issues
 
         # get and process the file changes after creating any folders
         for f in google_drive_changes:
@@ -823,14 +844,58 @@ def main():
 
     
     # need start this in a separate worker thread i think.   
-    print("initial sync complete watching for Google drive changes")
+    #print("initial sync complete watching for Google drive changes")
     logging.info("initial sync complete. watching for Google drive changes.")
     try:
         while True:
             try:
                 changes = get_drive_changes(service, CHANGES_TOKEN)
                 logging.debug("retrieved %d changes from google drive" % len(changes))
-                # process the folders first
+                
+                # grab full metadata for all the files first so that we can make informed decisions on the fly
+                enrichedChanges = []
+                for change in changes:
+                    gObject = get_google_object(service, change['fileId'])
+                    enrichedChanges.append(gObject)
+
+                # handle removes first
+                i = len(enrichedChanges) - 1
+                for i in reversed(range(len(enrichedChanges))):
+                    if enrichedChanges[i].properties['trashed']:
+                        if enrichedChanges[i].mimeType != TYPE_GOOGLE_FOLDER and TYPE_GOOGLE_APPS not in enrichedChanges[i].mimeType:
+                            if 'parents' in enrichedChanges[i].properties.keys():
+                                for parent_id in enrichedChanges[i].properties['parents']:
+                                    parent_folder = get_google_object(service, parent_id)
+                                    full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                        get_full_folder_path(service, parent_folder), \
+                                        enrichedChanges[i].name)
+                                    full_path = os.path.expanduser(full_path)
+                                    if os.path.exists(full_path):
+                                        logging.info("removing trashed file '%s'" % full_path)
+                                        os.remove(full_path)
+                                        DATABASE.update_gObject(file=enrichedChanges[i])
+                            changes.pop(i)
+
+                i = len(enrichedChanges) - 1
+                for i in reversed(range(len(enrichedChanges))):
+                    if enrichedChanges[i].properties['trashed']:
+                        if enrichedChanges[i].mimeType == TYPE_GOOGLE_FOLDER:
+                            if 'parents' in enrichedChanges[i].properties.keys():
+                                for parent_id in enrichedChanges[i].properties['parents']:
+                                    parent_folder = get_google_object(service, parent_id)
+                                    full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                        get_full_folder_path(service, parent_folder), \
+                                        enrichedChanges[i].name)
+                                    full_path = os.path.expanduser(full_path)
+                                    if os.path.exists(full_path):
+                                        if len(os.listdir(full_path)) == 0:
+                                            logging.info("removing trashed directory '%s'" % full_path)
+                                            os.rmdir(full_path)
+                                            DATABASE.update_gObject(folder=enrichedChanges[i])
+                            changes.pop(i)
+
+                
+                # process the folders first for additions
                 i = 0 
                 for i in range(len(changes)):
                     full_path = ""
@@ -855,17 +920,18 @@ def main():
                 for change in changes:
                     if not change['removed'] == True:
                         if TYPE_GOOGLE_APPS not in change['file']['mimeType']:
-                            file = get_google_object(service, changes[i]['fileId']) 
-                            if 'parents' not in file.properties.keys():                    
-                                file.properties['parents'] = (ROOT_FOLDER_ID, )
-                            for parent_id in file.properties['parents']:
-                                parent_folder = get_google_object(service, parent_id)
-                                full_path = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), file.name)
-                                full_path = os.path.expanduser(full_path)
-                                if not os.path.exists(os.path.dirname(full_path)):
-                                    # need to make directories if we don't own the folders
-                                    os.makedirs(os.path.dirname(full_path), exist_ok=True)
-                                download_file(service, file, full_path)
+                            file = get_google_object(service, changes[i]['fileId'])
+                            if not file.properties['trashed'] == True:
+                                if 'parents' not in file.properties.keys():                    
+                                    file.properties['parents'] = (ROOT_FOLDER_ID, )
+                                for parent_id in file.properties['parents']:
+                                    parent_folder = get_google_object(service, parent_id)
+                                    full_path = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, parent_folder), file.name)
+                                    full_path = os.path.expanduser(full_path)
+                                    if not os.path.exists(os.path.dirname(full_path)):
+                                        # need to make directories if we don't own the folders
+                                        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+                                    download_file(service, file, full_path)
 
                     else:
                         # handle removes later

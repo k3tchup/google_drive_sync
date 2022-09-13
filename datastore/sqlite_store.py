@@ -162,6 +162,53 @@ class sqlite_store:
 
         return gObjects, totalFetched
 
+
+    def fetch_deletedObjects(self, pageSize:int = 100, offset:int=0):
+        gObjects = []
+        totalFetched = 0
+        try:
+            # there are duplicate files in Google drive, some of which are deleted
+            # we just need to be careful about removign local files if there are 
+            # versions of the file that arent' deleted. 
+            # this query should accomplish just that.
+            fetchObjects_sql = 'SELECT id, name, mime_type, md5, local_path, properties \
+                                    FROM gObjects WHERE \
+                                        json_extract(properties, "$.trashed") = 1 \
+                                    AND local_path NOT IN ( \
+                                        SELECT local_path \
+                                        FROM gObjects \
+                                        GROUP BY md5, local_path \
+                                        HAVING count(md5) > 1 and count(local_path) > 1 \
+                                    ) LIMIT ? OFFSET ?; '
+
+            sqlParams = (pageSize, offset)
+            self.cursor.execute(fetchObjects_sql, sqlParams)
+            rows = self.cursor.fetchall()
+
+            for row in rows:
+                mimeType = row[2]
+                if "folder" in mimeType:
+                    f = gFolder(json.loads(row[5]))
+                else:
+                    f = gFile(json.loads(row[5]))
+                    f.md5 = row[3]
+                f.id = row[0]
+                f.name = row[1]
+                f.mimeType = row[2]
+                f.localPath = row[4]
+                #f.properties = json.loads(row[5])
+
+                gObjects.append(f)
+
+                totalFetched += 1
+                
+        except sqlite3.Error as e:
+            logging.error("Unable to fetch deleted records. %s" % str(e))
+        except Exception as e:
+            logging.error("Unable to fetch deleted records. %s" % str(e))
+
+        return gObjects, totalFetched
+
     def insert_gObject(self, folder:gFolder = None, file:gFile = None):
         if folder is not None and file is not None:
             raise("invalid parameter set.  supply folder or file option, not both.")
@@ -319,7 +366,8 @@ class sqlite_store:
                             ON gObjects.md5 = local_files.md5 AND \
                             gObjects.local_path = local_files.path \
                             WHERE local_files.md5 IS NULL \
-                            AND gObjects.mime_type NOT LIKE "%folder%");'
+                            AND gObjects.mime_type NOT LIKE "%folder%" \
+                            AND json_extract(properties, "$.trashed") = 0);'
             self.cursor.execute(delete_sql)
             self.conn.commit()
             
