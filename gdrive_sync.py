@@ -6,6 +6,7 @@ from glob import glob
 from http.client import BAD_REQUEST
 from multiprocessing.connection import wait
 import py_compile
+from shelve import DbfilenameShelf
 from time import sleep
 from typing import List
 import json
@@ -494,8 +495,9 @@ def scan_local_files(parentFolder:str):
             if os.path.isfile(object):
                 # multi-thread this too
                 md5 = hash_file(object)
-                DATABASE.insert_localFile(object, md5)
+                DATABASE.insert_localFile(object, md5, "file")
             elif os.path.isdir(object):
+                DATABASE.insert_localFile(object, '', 'directory')
                 scan_local_files(os.path.join(object))
             else:
                 return
@@ -514,7 +516,7 @@ def get_all_drive_files_not_in_db(service) -> List:
     # important: if the file in google drive is a later version, it's authoritative
     # this will be the changes from the side of google drive
     
-    logging.info("scanning google drive files, looking for files not in database")
+    logging.info("scanning google drive files, looking for files and folders that have changed.")
     differences = []
     try:
         gServiceFiles = service.files()
@@ -588,6 +590,7 @@ def reconcile_local_files_with_db():
     DATABASE.clear_local_files()
     scan_local_files(localDrivePath)
 
+
     # any files that are in the db but not on disk, purge the db records
     # don't delete files that are marked as trashed, otherwise we'll download them again
     logging.info("purging database entries where objects aren't found on disk")
@@ -600,9 +603,9 @@ def reconcile_local_files_with_db():
         trashedObjects, toCount = DATABASE.fetch_deletedObjects(offset=toCount)
         for file in trashedObjects:
             if file.mimeType != TYPE_GOOGLE_FOLDER and TYPE_GOOGLE_APPS not in file.mimeType:
-                logging.info("removing trashed file '%s' from local filesystem." % file.localPath)
                 try:
                     if os.path.exists(file.localPath):
+                        logging.info("removing trashed file '%s' from local filesystem." % file.localPath)
                         os.remove(file.localPath)
                 except Exception as err:
                     logging.error("error removing trashed file %s. %s" % (file.localPath, str(err)))
@@ -611,10 +614,10 @@ def reconcile_local_files_with_db():
         # try to remove the directories (should be empty)
         for file in trashedObjects:
             if file.mimeType == TYPE_GOOGLE_FOLDER:
-                logging.info("removing trashed folder '%s' from local filesystem." % file.localPath)
                 try:
                     if os.path.exists(file.localPath):
                         if (len(os.listdir(file.localPath) == 0)):
+                            logging.info("removing trashed folder '%s' from local filesystem." % file.localPath)
                             os.rmdir(file.localPath)
                         else:
                             logging.warning("folder %s isn't empty, skipping." % file.localPath)
@@ -623,11 +626,82 @@ def reconcile_local_files_with_db():
         if toCount == 0:
             break
     
-    # to do 
-
     return
 
-# identify files on disk that are missing or different from the database
+def handle_changed_folder(service, folder: gFolder = None):
+    try:
+        
+        parents = []
+                
+        if folder is not None:
+            # *************************************************************************
+            #    create or update and existing folder
+            # *************************************************************************
+            dbFolders = DATABASE.fetch_gObject(folder.id)
+            if len(dbFolders) > 1:
+                logging.warn("folder id %s has multiple entries in the database. skipping." % folder.id)
+            elif len(dbFolders) == 0:
+                logging.debug("folder %s isn't in the database, assuming a new object." % folder.id)
+                DATABASE.insert_gObject(folder=folder)
+                if 'parents' in folder.properties.keys():
+                    for parent_id in folder.properties['parents']:
+                        parent_folder = get_google_object(service, parent_id)
+                        full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                            get_full_folder_path(service, parent_folder), \
+                            folder.name)
+                        full_path = os.path.expanduser(full_path)
+                        if not os.path.exists(full_path):
+                            logging.info("creating new local folder '%s'" % full_path)
+                            os.mkdir(os.path.expanduser(full_path))
+
+            else:
+                # if folder name is different, rename it.  if it's trashed, remove it.  only changes possible for folders
+                dbFolder = dbFolders[0]
+                if folder.properties != dbFolder.properties and int(folder.properties['version']) > int(dbFolder.properties['version']):
+                    logging.info("folder id %s has a later version and different properties in Google Drive, applying changes" % folder.id)
+                    # update the folder properties in the db
+                    DATABASE.update_gObject(folder=folder)
+                    # **** rename the local folder(s) ****
+                    if folder.name != dbFolder.name:
+                        for parent_id in folder.properties['parents']:
+                            for db_parent_id in dbFolder.properties['parents']:
+                                parent_folder = get_google_object(service, parent_id)
+                                root_path_new = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                    get_full_folder_path(service, parent_folder))
+                                full_path_new = os.path.join(root_path_new, folder.name)
+                                full_path_new = os.path.expanduser(full_path_new)
+
+                                parent_folder = get_google_object(service, db_parent_id)
+                                root_path_old = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                    get_full_folder_path(service, parent_folder))
+                                full_path_old = os.path.join(root_path_old, dbFolder.name)
+                                full_path_old = os.path.expanduser(full_path_old)
+
+                                if root_path_old == root_path_new:
+                                    os.rename(full_path_old, full_path_new)
+                
+                # ***** delete a local folder ******
+                if folder.properties['trashed'] == True:
+                    if 'parents' in folder.properties.keys():
+                        for parent_id in folder.properties['parents']:
+                            parent_folder = get_google_object(service, parent_id)
+                            full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                get_full_folder_path(service, parent_folder), \
+                                folder.name)
+                            full_path = os.path.expanduser(full_path)
+                            if os.path.exists(full_path):
+                                if len(os.listdir(full_path)) == 0:
+                                    logging.info("removing trashed directory '%s'" % full_path)
+                                    os.rmdir(full_path)
+                                else:
+                                    logging.warning("unable to remove trashed dir '%s'. not empty" % full_path) 
+                            
+    except Exception as err:
+        logging.error("error processing Google object change. %s" % str(err))
+    except HttpError as err:
+        logging.error("error processing Google object change. %s" % str(err))
+    return
+
 
 def main():
 
@@ -642,18 +716,6 @@ def main():
         logFile = os.path.join(logDir, 'sync.log')
         if not os.path.exists(logDir):
             os.mkdir(logDir)
-        
-        '''
-        logParams = {
-            "filename": logFile,
-            "filemode": 'w',
-            "format": '%(asctime)s: %(name)s - %(levelname)s -[%(filename)s:%(lineno)s - %(funcName)s() ] - %(message)s',
-            "datefmt": '%d-%b-%y %H:%M:%S',
-            "level": cfg.LOG_LEVEL
-        }
-        logging.basicConfig(**logParams)
-        logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
-        '''
 
         logFormatter = logging.Formatter("%(asctime)s: %(name)s - %(levelname)s -[%(filename)s:%(lineno)s - %(funcName)s() ] - %(message)s")
         logFormatter.datefmt = '%d-%b-%y %H:%M:%S'
@@ -806,6 +868,7 @@ def main():
         i = len(google_drive_changes) - 1
         for i in reversed(range(len(google_drive_changes))):
             if google_drive_changes[i].mimeType == 'application/vnd.google-apps.folder':
+                '''
                 for parent_id in google_drive_changes[i].properties['parents']:
                     parent_folder = get_google_object(service, parent_id)
                     full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
@@ -814,9 +877,13 @@ def main():
                     full_path = os.path.expanduser(full_path)
                     if not os.path.exists(full_path):
                         os.mkdir(os.path.expanduser(full_path))
+                        google_drive_changes[i].localPath = full_path
                         DATABASE.insert_gObject(folder = google_drive_changes[i])
+                '''
+                handle_changed_folder(service, google_drive_changes[i])
                 google_drive_changes.pop(i)
                 #i-=1 # to avoid array index issues
+
 
         # get and process the file changes after creating any folders
         for f in google_drive_changes:
@@ -880,6 +947,7 @@ def main():
                 for i in reversed(range(len(enrichedChanges))):
                     if enrichedChanges[i].properties['trashed']:
                         if enrichedChanges[i].mimeType == TYPE_GOOGLE_FOLDER:
+                            '''
                             if 'parents' in enrichedChanges[i].properties.keys():
                                 for parent_id in enrichedChanges[i].properties['parents']:
                                     parent_folder = get_google_object(service, parent_id)
@@ -892,6 +960,8 @@ def main():
                                             logging.info("removing trashed directory '%s'" % full_path)
                                             os.rmdir(full_path)
                                             DATABASE.update_gObject(folder=enrichedChanges[i])
+                            '''
+                            handle_changed_folder(service, enrichedChanges[i])
                             changes.pop(i)
 
                 
@@ -902,6 +972,7 @@ def main():
                     if changes[i]['removed'] == False:
                         if changes[i]['file']['mimeType'] == TYPE_GOOGLE_FOLDER:
                             folder = get_google_object(service, changes[i]['fileId']) 
+                            '''
                             if 'parents' in folder.properties.keys():
                                 for parent_id in folder.properties['parents']:
                                     parent_folder = get_google_object(service, parent_id)
@@ -912,6 +983,8 @@ def main():
                                     if not os.path.exists(full_path):
                                         os.mkdir(os.path.expanduser(full_path))
                                         DATABASE.insert_gObject(folder = folder)
+                            '''
+                            handle_changed_folder(service, folder)
                             changes.pop(i)
                     else:
                         # handle removal of files and folders later

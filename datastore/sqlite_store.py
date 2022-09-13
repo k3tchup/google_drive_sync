@@ -41,7 +41,8 @@ class sqlite_store:
             localFiles_sql = "CREATE TABLE IF NOT EXISTS local_files (\
                                 id integer PRIMARY KEY, \
                                 path text NOT NULL, \
-                                md5 text NOT NULL);"
+                                md5 text NOT NULL, \
+                                mime_type text NOT NULL);"
 
             procInsertObject_sql = "INSERT INTO gObjects\
                                     (id, Name, Joining_date, salary) VALUES (%s,%s,%s,%s)"
@@ -288,10 +289,10 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to insert parents for object id %s. %s" % (id, str(e))) 
                 
-    def insert_localFile(self, path:str, md5: str):
+    def insert_localFile(self, path:str, md5: str, mime_type:str):
         try:
-            insert_localFile_sql = "INSERT INTO local_files (path, md5) values (?, ?);"
-            sqlParams = (path, md5)
+            insert_localFile_sql = "INSERT INTO local_files (path, md5, mime_type) values (?, ?, ?);"
+            sqlParams = (path, md5, mime_type)
             self.cursor.execute(insert_localFile_sql, sqlParams)
 
         except sqlite3.Error as e:
@@ -366,11 +367,24 @@ class sqlite_store:
                             ON gObjects.md5 = local_files.md5 AND \
                             gObjects.local_path = local_files.path \
                             WHERE local_files.md5 IS NULL \
+                            AND local_files.mime_type = "file" \
                             AND gObjects.mime_type NOT LIKE "%folder%" \
                             AND json_extract(properties, "$.trashed") = 0);'
             self.cursor.execute(delete_sql)
             self.conn.commit()
-            
+
+            delete_sql = 'DELETE FROM gObjects \
+                            WHERE id IN (\
+                            SELECT gObjects.id from gObjects\
+                            LEFT JOIN local_files \
+                            ON gObjects.local_path = local_files.path \
+                            WHERE local_files.path IS NULL \
+                            AND local_files.mime_type = "directory" \
+                            AND gObjects.mime_type LIKE "%folder%" \
+                            AND json_extract(properties, "$.trashed") = 0);'
+            self.cursor.execute(delete_sql)
+            self.conn.commit()
+
         except sqlite3.Error as e:
             logging.error("Error deleting files not on disk. %s" % (id, str(e)))
         except Exception as e:
