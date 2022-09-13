@@ -169,7 +169,7 @@ class sqlite_store:
         totalFetched = 0
         try:
             # there are duplicate files in Google drive, some of which are deleted
-            # we just need to be careful about removign local files if there are 
+            # we just need to be careful about removing local files if there are 
             # versions of the file that arent' deleted. 
             # this query should accomplish just that.
             fetchObjects_sql = 'SELECT id, name, mime_type, md5, local_path, properties \

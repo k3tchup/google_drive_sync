@@ -538,8 +538,10 @@ def get_all_drive_files_not_in_db(service) -> List:
                 if f['mimeType'] == TYPE_GOOGLE_FOLDER:
                     googleFolder = gFolder(f)
                     if dbFile is not None:
-                        if dbFile.id != googleFolder.id and \
-                                    dbFile.name != googleFolder.name:
+                        # if (dbFile.id != googleFolder.id or \
+                        #            dbFile.name != googleFolder.name) and \
+                        #            dbFile.properties['version'] < googleFolder.properties['version']:
+                        if (int(dbFile.properties['version']) < int(googleFolder.properties['version'])):
                             # fetch full metadata of the file
                             get_params = {"fileId": googleFolder.id, "fields": "*"}
                             get_req = gServiceFiles.get(**get_params)
@@ -554,9 +556,10 @@ def get_all_drive_files_not_in_db(service) -> List:
                 else:
                     googleFile = gFile(f)
                     if dbFile is not None:
-                        if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
-                            dbFile.mimeType != googleFile.mimeType) and \
-                            dbFile.properties['version'] < googleFile.properties['version']:
+                        #if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
+                        #    dbFile.mimeType != googleFile.mimeType) and \
+                        #    dbFile.properties['version'] < googleFile.properties['version']:
+                        if (int(dbFile.properties['version']) < int(googleFile.properties['version'])):
                                 # fetch full metadata of the file
                                 get_params = {"fileId": googleFile.id, "fields": "*"}
                                 get_req = gServiceFiles.get(**get_params)
@@ -653,11 +656,12 @@ def handle_changed_file(service, file:gFile = None):
             else:
                 # **** handle file updates
                 dbFile  = dbFiles[0]
-                DATABASE.update_gObject(file=file)
                 if file.properties != dbFile.properties and int(file.properties['version']) > int(dbFile.properties['version']):
                     # if the md5 is different for the file, then we are going to remove the local version and re-download
                     logging.info("file id %s is newer in the cloud and has changes, processing." % file.id)
                     if file.properties['md5Checksum'] != dbFile.md5 or file.name != dbFile.name:
+                        file.md5 = dbFile.md5 # we'll download it later if we need to
+                        DATABASE.update_gObject(file=file)
                         try:
                             # delete the existing files and redownload for each instance of the file
                             if 'parents' in file.properties.keys():
@@ -705,7 +709,7 @@ def handle_changed_file(service, file:gFile = None):
                                     full_path = os.path.expanduser(full_path)
                                     if os.path.exists(full_path):
                                         logging.info("removing trashed file '%s'" % full_path)
-                                        os.rmdir(full_path)
+                                        os.remove(full_path)
                                 except Exception as err:
                                     logging.error("unable to remove local file %s. %s" % (full_path, str(err)))
 
