@@ -20,7 +20,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from googleapiclient.http import MediaIoBaseDownload
+#from googleapiclient.http import MediaIoBaseDownload
 #import googleapiclient
 #import google_auth_httplib2
 #import httplib2
@@ -312,6 +312,7 @@ def main():
 
     # read the local cache and create linked folder tree objects
     #newFolder = create_drive_folder(service, "test5")
+    file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')
 
     folders = read_folder_cache_from_db()
 

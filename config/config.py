@@ -35,6 +35,7 @@ MEDIA_EXPORT_MATRIX = {
             }
 }
 DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
+UPLOAD_RETRIES_MAX = 3
 
 
 # global variables that store dynamic values

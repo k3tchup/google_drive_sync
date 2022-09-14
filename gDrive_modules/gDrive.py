@@ -13,6 +13,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload
 import googleapiclient
 import google_auth_httplib2
 import httplib2
@@ -353,6 +354,74 @@ def create_drive_folder(service, folderName:str, parentId:str=None) -> gFolder:
         logging.error("error creating Google Drive folder. %s" % str(err))
 
     return folder
+
+
+def upload_file(service, filePath:str, parentId:str = None)-> gFile:
+    file = None
+    attempt = 1
+    try:
+        while attempt <= cfg.UPLOAD_RETRIES_MAX:
+            # if file is under 5 mb perform a simple upload
+            fileSize = os.path.getsize(filePath)
+            fileHash = hash_file(filePath)
+            if fileSize <= (5 * 1024 * 1024):
+                f = upload_file_simple(service, filePath, parentId)
+            else:
+                # we need to figure out how to resumable uploads at some point later
+                f = upload_file_simple(service, filePath, parentId)
+            file = gFile(f)
+            if fileHash != file.properties['md5Checksum']:
+                logging.warning("File upload resulted in a hash mismatch.")
+                # remove the file
+                file = delete_gdrive_file(service, file)
+                attempt += 1
+            else:
+                file.localPath = filePath
+                file.md5 = fileHash
+                cfg.DATABASE.insert_gObject(file=file)
+                break
+        if attempt == cfg.UPLOAD_RETRIES_MAX:
+            logging.error("Exceeded max retries to upload file '%s'" % filePath)
+    except HttpError as err:
+        logging.error("error uploading file to Google Drive. %s" % str(err))
+    except Exception as err:
+        logging.error("error uploading file to Google Drive. %s" % str(err))
+    return file
+
+def upload_file_simple(service, filePath:str, parentId:str=None)->gFile:
+    file = None
+    try:
+        if parentId is None or parentId == "":
+            parentId = cfg.ROOT_FOLDER_ID
+        fileDir = os.path.dirname(filePath)
+        fileName = os.path.basename(filePath)
+        logging.info("performing simple upload of file '%s'" % filePath)
+        file_metadata = {'name': fileName, 'parents': (parentId, )}
+        media = MediaFileUpload(filePath)
+        file = service.files().create(body=file_metadata, media_body=media,
+                                      fields='*').execute()
+    except HttpError as err:
+        logging.error("error downing a simple file upload to Google Drive. %s" % str(err))
+    except Exception as err:
+        logging.error("error downing a simple file upload to Google Drive. %s" % str(err))
+    return file
+
+
+def delete_gdrive_file(service, file:gFile):
+    file = None
+    try:
+        file.properties['trashed'] = True
+        gSerivceFiles = service.files()
+        params = { 'fileId': file.id, 'trashed': True}
+        f = gSerivceFiles.update(**params).execute()
+        file = gFile(f)
+        cfg.DATABASE.update_gObject(file=file)
+
+    except HttpError as err:
+        logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))
+    except Exception as err:
+        logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))
+    return file    
 
 # region : Change tracking in Google drive
 
