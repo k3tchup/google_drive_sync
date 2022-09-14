@@ -113,6 +113,11 @@ def download_file(service, file: gFile, targetPath:str, threadSafeDB:sqlite_stor
         logging.info("downloading file %s." % targetPath)
         #print("downloading file %s." % targetPath)
 
+        fileDir = os.path.dirname(targetPath)
+        if not os.path.exists(fileDir):
+            logging.debug("file's parent directory '%s' doesn't exist, creating." % fileDir)
+            os.makedirs(os.path.expanduser(fileDir))
+
         while done is False:
             status, done = downloader.next_chunk()
             #print(F'Download {int(status.progress() * 100)}.')

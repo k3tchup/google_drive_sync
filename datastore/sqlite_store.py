@@ -373,6 +373,15 @@ class sqlite_store:
             self.cursor.execute(delete_sql)
             self.conn.commit()
 
+            delete_sql = 'DELETE from gObjects \
+                            WHERE local_path NOT IN ( \
+                            SELECT path FROM local_files) \
+                            AND gObjects.local_path IS NOT null \
+                            AND gObjects.mime_type NOT LIKE "%folder%" \
+                            AND json_extract(gObjects.properties, "$.trashed") = 0;'
+            self.cursor.execute(delete_sql)
+            self.conn.commit()
+            
             delete_sql = 'DELETE FROM gObjects \
                             WHERE id IN (\
                             SELECT gObjects.id from gObjects\
