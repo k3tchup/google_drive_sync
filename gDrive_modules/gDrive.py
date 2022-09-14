@@ -496,7 +496,8 @@ def handle_changed_file(service, file:gFile = None):
                 if file.properties != dbFile.properties and int(file.properties['version']) > int(dbFile.properties['version']):
                     # if the md5 is different for the file, then we are going to remove the local version and re-download
                     logging.info("file id %s is newer in the cloud and has changes, processing." % file.id)
-                    if file.properties['md5Checksum'] != dbFile.md5 or file.name != dbFile.name:
+                    if (file.properties['trashed'] == False) and \
+                                (file.properties['md5Checksum'] != dbFile.md5 or file.name != dbFile.name):
                         file.md5 = dbFile.md5 # we'll download it later if we need to
                         cfg.DATABASE.update_gObject(file=file)
                         try:
@@ -536,6 +537,8 @@ def handle_changed_file(service, file:gFile = None):
 
                     # ***** delete a local file ******
                     if file.properties['trashed'] == True:
+                        file.md5 = dbFile.md5
+                        cfg.DATABASE.update_gObject(file=file)
                         if 'parents' in file.properties.keys():
                             for parent_id in file.properties['parents']:
                                 try:

@@ -21,6 +21,7 @@ https://www.googleapis.com/auth/activity
   * full sync down to local from Google drive
   * export of native Google Apps files, like Docs and Sheets.
   * hash verify the files
+  * continuous monitoring for Drive for any changes and updating of local versions accordingly
 * Sqlite database for metadata data storage 
 * Handle incremental changes by subscribing to Google Drive change tokens
 * Fetches files not owned by the Drive owner into a separate local folder
@@ -89,6 +90,10 @@ The requirements.txt should list the remainder of the requirements.
 [x] subscribe to change notifications provided by Google drive
 
 [ ] figure out why there are duplicate files with the same name and hash.  something to do with change sets.
+
+[ ] store the token.json contents in a key vault
+
+[ ] move the local database cache and other variable data into the user's home directory
 
 [x] logging 
 - will need some improvement as we get going
