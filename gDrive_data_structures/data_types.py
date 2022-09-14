@@ -1,4 +1,6 @@
 # base element of a google drive object
+import copy
+
 class gDriveElement:
     def __init__(self, driveObjectData):
         self.id = driveObjectData['id']

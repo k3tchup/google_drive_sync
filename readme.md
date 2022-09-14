@@ -25,6 +25,12 @@ https://www.googleapis.com/auth/activity
 * Handle incremental changes by subscribing to Google Drive change tokens
 * Fetches files not owned by the Drive owner into a separate local folder
 
+## Requirements
+
+This code was written with Python 3.8.   Google Drive API requires Python 3.7 plus.   
+
+The requirements.txt should list the remainder of the requirements. 
+
 ## To-do (work in progress)
 
 [x] connect, manage scopes, tokens, credentials
@@ -64,6 +70,8 @@ https://www.googleapis.com/auth/activity
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
 
+[ ] change handling currently redownloads the file and then deletes it.  this is ineffecient, optimize this.
+
 [ ] upload files
 
 [ ] resumable uploads (in case the connection fails)
@@ -71,6 +79,10 @@ https://www.googleapis.com/auth/activity
 [x] delete files locally
 
 [ ] delete files remotely
+
+[ ] clear out trashed files after they expire on Google's side
+
+[ ] there are instances when folders with the same name just inherit the same id when a few folder is crated with the same name.  need to debug this.
 
 [x] version handling so we don't transfer files we don't need to.   there are version numbers in the metadata
 

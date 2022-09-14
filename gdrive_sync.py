@@ -1,14 +1,9 @@
 #!/usr/bin/env python3.8
 
 from __future__ import print_function
-#from genericpath import isdir, isfile
-#from glob import glob
-#from http.client import BAD_REQUEST
-#from shelve import DbfilenameShelf
 from time import sleep
 from typing import List
 import json
-#import io
 import logging
 import os.path
 from datetime import datetime
@@ -310,10 +305,13 @@ def main():
     # fetch all the folders and structure from google drive
     #writeFolderCache(service) # only needed on first run to create the local folder tree
 
-    # read the local cache and create linked folder tree objects
+    # **************************************************************
+    #  testing ground
+    # **************************************************************
     #newFolder = create_drive_folder(service, "test5")
-    file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')
+    #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')
 
+    # read the local cache and create linked folder tree objects
     folders = read_folder_cache_from_db()
 
     """
