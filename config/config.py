@@ -8,6 +8,7 @@
 import logging
 
 
+# config variables that can be changed
 LOG_LEVEL = logging.DEBUG
 CONSOLE_LOG_LEVEL = logging.INFO
 TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
@@ -34,3 +35,14 @@ MEDIA_EXPORT_MATRIX = {
             }
 }
 DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
+
+
+# global variables that store dynamic values
+ROOT_FOLDER_ID = ""
+ROOT_FOLDER_OBJECT = None
+MAX_THREADS = 1
+CREDENTIALS = None
+DATABASE = None
+CHANGES_TOKEN = None
+TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
+TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'

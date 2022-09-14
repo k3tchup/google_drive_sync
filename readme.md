@@ -20,6 +20,7 @@ https://www.googleapis.com/auth/activity
   * downloading individual files
   * full sync down to local from Google drive
   * export of native Google Apps files, like Docs and Sheets.
+  * hash verify the files
 * Sqlite database for metadata data storage 
 * Handle incremental changes by subscribing to Google Drive change tokens
 * Fetches files not owned by the Drive owner into a separate local folder
@@ -49,7 +50,7 @@ https://www.googleapis.com/auth/activity
 - mostly there
 - still need to add more supported foramts. what are they?
 
-[ ] checksum / hash verfication of downloaded files
+[x] checksum / hash verfication of downloaded files
 
 [ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  
 
@@ -67,7 +68,7 @@ https://www.googleapis.com/auth/activity
 
 [ ] resumable uploads (in case the connection fails)
 
-[ ] delete files locally
+[x] delete files locally
 
 [ ] delete files remotely
 
