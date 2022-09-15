@@ -141,7 +141,7 @@ def reconcile_local_files_with_db():
             if file.mimeType == cfg.TYPE_GOOGLE_FOLDER:
                 try:
                     if os.path.exists(file.localPath):
-                        if (len(os.listdir(file.localPath) == 0)):
+                        if (len(os.listdir(file.localPath)) == 0):
                             logging.info("removing trashed folder '%s' from local filesystem." % file.localPath)
                             os.rmdir(file.localPath)
                         else:
@@ -191,7 +191,7 @@ def main():
         raise Exception("unable to initialize logging")
 
     # fix up paths in the config
-    cfg.DATABASE_PATH = os.path.expanduser(cfg.DATABASE_PATH)
+    cfg.DRIVE_CACHE_PATH = os.path.expanduser(cfg.DRIVE_CACHE_PATH)
 
     """
     ********************************************************************
@@ -282,6 +282,8 @@ def main():
     rootFolder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, rootFolder.name)
     cfg.DATABASE.insert_gObject(folder=rootFolder) # won't insert a dupe
 
+
+    #update_db_folder_paths()
 
     #logging.info("clearing the local folder cache")
     #clearFolderCache(FOLDERS_CACHE_PATH)

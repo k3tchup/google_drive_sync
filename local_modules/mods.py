@@ -187,3 +187,39 @@ def copy_folder_tree(rootFolder:gFolder, destPath:str):
             print(err)
     else:
         return
+
+def update_db_folder_paths():
+    try:
+        folders, count = cfg.DATABASE.fetch_gObjectSet(searchField = 'mime_type', searchCriteria = '%folder%')
+        records_processed = 0
+
+        while count > 0:
+            for folder in folders:
+                if folder.localPath == "" or folder.localPath is None:
+                    full_path = str(folder.name)
+    
+                    if 'parents' in folder.properties.keys():   
+                        parent = cfg.DATABASE.fetch_gObject(folder.properties['parents'][0])[0]
+                        full_path = parent.name + "/" + full_path
+                        while 'parents' in parent.properties.keys():
+                            parent = cfg.DATABASE.fetch_gObject(parent.properties['parents'][0])[0]
+                            full_path = parent.name + "/" + full_path
+                        if 'ownedByMe' in parent.properties.keys():
+                            if parent.properties['ownedByMe'] == False:
+                                # a folder shared outside of the current owner for the drive object.  
+                                # stick in the root folder
+                                full_path = "_shared_withme/" + full_path
+   
+                    else:
+                        if folder.properties['ownedByMe'] == False:
+                            full_path = "_shared_withme/" + full_path
+                    
+                    folder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, full_path)
+                    folder = cfg.DATABASE.update_gObject(folder=folder)
+            
+            records_processed += count
+            folders, count = cfg.DATABASE.fetch_gObjectSet(offset=records_processed, searchField = 'mime_type', searchCriteria = '%folder%')
+
+
+    except Exception as err:
+        logging.error("error updating local paths of folders in the database. %s" % str(err))
