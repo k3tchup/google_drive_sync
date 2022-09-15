@@ -8,7 +8,6 @@ import logging
 import os.path
 from datetime import datetime
 
-
 # google and http imports
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -28,28 +27,8 @@ from config import config as cfg
 from gDrive_modules.gDrive import *
 from local_modules.mods import *
 
-def scan_local_files(parentFolder:str):
-    try:
-        objects = os.listdir(parentFolder)
-        for object in objects:
-            object = os.path.join(parentFolder, object)
-            if os.path.isfile(object):
-                # multi-thread this too
-                md5 = hash_file(object)
-                cfg.DATABASE.insert_localFile(object, md5, "file")
-            elif os.path.isdir(object):
-                cfg.DATABASE.insert_localFile(object, '', 'directory')
-                scan_local_files(os.path.join(object))
-            else:
-                return
-        
-
-    except Exception as err:
-        logging.error("error scanning local folder %s. %s", (parentFolder, str(err)))
-        print(str(err))  
-
 # scans all files in Google drive that aren't in the db.  that's our change set.
-def get_all_drive_files_not_in_db(service) -> List:
+def get_gdrive_changes(service) -> List:
     # loop through the pages of files from google drive
     # return the md5Checksum property, along with name, id, mimeType, version, parents
     # compare files by id with the db.  look where the md5Checksum != md5 stored in the db
@@ -87,6 +66,7 @@ def get_all_drive_files_not_in_db(service) -> List:
                             get_params = {"fileId": googleFolder.id, "fields": "*"}
                             get_req = gServiceFiles.get(**get_params)
                             full_folder = gFolder(get_req.execute())
+                            full_folder.localPath = get_full_folder_path(service, full_folder)
                             differences.append(full_folder)
                     else:
                         get_params = {"fileId": googleFolder.id, "fields": "*"}
@@ -133,7 +113,7 @@ def reconcile_local_files_with_db():
 
     logging.info("starting to scan local Google drive cache in %s" % localDrivePath)
     cfg.DATABASE.clear_local_files()
-    scan_local_files(localDrivePath)
+    scan_local_files_mt(localDrivePath)
 
 
     # any files that are in the db but not on disk, purge the db records
@@ -209,6 +189,9 @@ def main():
     except Exception as err:
         print(str(err))
         raise Exception("unable to initialize logging")
+
+    # fix up paths in the config
+    cfg.DATABASE_PATH = os.path.expanduser(cfg.DATABASE_PATH)
 
     """
     ********************************************************************
@@ -296,6 +279,7 @@ def main():
     cfg.ROOT_FOLDER_OBJECT = rootFolder
 
     cfg.DATABASE.open(dbPath=cfg.DATABASE_PATH)
+    rootFolder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, rootFolder.name)
     cfg.DATABASE.insert_gObject(folder=rootFolder) # won't insert a dupe
 
 
@@ -334,7 +318,7 @@ def main():
     # this is a full scan which should only be run upon the initial start up. 
     # once the program is running, it will subscribe to change notifications  
     google_drive_changes = []
-    google_drive_changes = get_all_drive_files_not_in_db(service)
+    google_drive_changes = get_gdrive_changes(service)
 
 
     # *** multi-thread this in the future
@@ -398,8 +382,8 @@ def main():
 
                 
                 # process the folders first for additions
-                i = 0 
-                for i in range(len(changes)):
+                i = len(changes) -1
+                for i in reversed(range(len(changes))):
                     full_path = ""
                     if changes[i]['removed'] == False:
                         if changes[i]['file']['mimeType'] == cfg.TYPE_GOOGLE_FOLDER:

@@ -283,6 +283,7 @@ def write_folder_cache(service, localCachePath:str = cfg.FOLDERS_CACHE_PATH):
                 #print(f)
                 with open(cfg.FOLDERS_CACHE_PATH + f['id'], 'w+') as folder_data:
                     folderObj = gFolder(f)
+                    folderObj.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, folderObj))
                     cfg.DATABASE.insert_gObject(folder=folderObj)
                     if 'parents' in folderObj.properties.keys():
                         cfg.DATABASE.insert_parents(folderObj.id, folderObj.properties['parents'])
@@ -486,7 +487,7 @@ def handle_changed_file(service, file:gFile = None):
             elif len(dbFiles) == 0:
                 # **** handle new files from Google Drive ****
                 logging.debug("file id %s isn't in the database, assuming a new object." % file.id)
-                cfg.DATABASE.insert_gObject(folder=file)
+                cfg.DATABASE.insert_gObject(file=file)
                 if 'parents' in file.properties.keys():
                     for parent_id in file.properties['parents']:
                         parent_folder = get_google_object(service, parent_id)
@@ -579,6 +580,7 @@ def handle_changed_folder(service, folder: gFolder = None):
                 logging.warn("folder id %s has multiple entries in the database. skipping." % folder.id)
             elif len(dbFolders) == 0:
                 logging.debug("folder %s isn't in the database, assuming a new object." % folder.id)
+                folder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, folder))
                 cfg.DATABASE.insert_gObject(folder=folder)
                 if 'parents' in folder.properties.keys():
                     for parent_id in folder.properties['parents']:
@@ -597,6 +599,7 @@ def handle_changed_folder(service, folder: gFolder = None):
                 if folder.properties != dbFolder.properties and int(folder.properties['version']) > int(dbFolder.properties['version']):
                     logging.info("folder id %s has a later version and different properties in Google Drive, applying changes" % folder.id)
                     # update the folder properties in the db
+                    folder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, folder))
                     cfg.DATABASE.update_gObject(folder=folder)
                     # **** rename the local folder(s) ****
                     if folder.name != dbFolder.name:

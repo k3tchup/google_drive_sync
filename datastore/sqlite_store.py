@@ -42,15 +42,19 @@ class sqlite_store:
                                 id integer PRIMARY KEY, \
                                 path text NOT NULL, \
                                 md5 text NOT NULL, \
-                                mime_type text NOT NULL);"
+                                mime_type text NOT NULL, \
+                                last_mod real NOT NULL);"
 
             procInsertObject_sql = "INSERT INTO gObjects\
                                     (id, Name, Joining_date, salary) VALUES (%s,%s,%s,%s)"
             
             self.cursor = self.conn.cursor()
             self.cursor.execute(gObjectTable_sql)
+            self.conn.commit()
             self.cursor.execute(parentChildrenTable_sql)
+            self.conn.commit()
             self.cursor.execute(localFiles_sql)
+            self.conn.commit()
         except sqlite3.Error as error:
             logging.error("error creating database schema %s." % str(err))
         except Exception as err:
@@ -61,6 +65,7 @@ class sqlite_store:
         try:
             truncateLocalFiles_sql = "DELETE FROM local_files;"
             self.cursor.execute(truncateLocalFiles_sql)
+            self.conn.commit()
         
         except sqlite3.Error as e:
             logging.error("Unable to truncate the local_files table. %s" % str(e))
@@ -289,11 +294,12 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to insert parents for object id %s. %s" % (id, str(e))) 
                 
-    def insert_localFile(self, path:str, md5: str, mime_type:str):
+    def insert_localFile(self, path:str, md5: str, mime_type:str, last_mod: float):
         try:
-            insert_localFile_sql = "INSERT INTO local_files (path, md5, mime_type) values (?, ?, ?);"
-            sqlParams = (path, md5, mime_type)
+            insert_localFile_sql = "INSERT INTO local_files (path, md5, mime_type, last_mod) values (?, ?, ?, ?);"
+            sqlParams = (path, md5, mime_type, last_mod)
             self.cursor.execute(insert_localFile_sql, sqlParams)
+            self.conn.commit()
 
         except sqlite3.Error as e:
             logging.error("Unable to insert parents for object id %s. %s" % (id, str(e)))
@@ -381,7 +387,7 @@ class sqlite_store:
                             AND json_extract(gObjects.properties, "$.trashed") = 0;'
             self.cursor.execute(delete_sql)
             self.conn.commit()
-            
+
             delete_sql = 'DELETE FROM gObjects \
                             WHERE id IN (\
                             SELECT gObjects.id from gObjects\

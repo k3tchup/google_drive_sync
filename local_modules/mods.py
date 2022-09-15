@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import sys
+import concurrent
 
 # application imports
 current = os.path.dirname(os.path.realpath(__file__))
@@ -106,6 +107,70 @@ def read_folder_cache_from_db() -> List[dict]:
     
     return gFolderObjects
 
+# multi-threaded function version
+def scan_local_files_mt(parentFolder:str): 
+    try:
+        objects = os.listdir(parentFolder)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=cfg.MAX_THREADS) as executor:
+            futures = []
+            for object in objects:
+                # build new database object for multi-threading too
+                threadSafeDB = sqlite_store()
+                threadSafeDB.open(cfg.DATABASE_PATH)
+
+                object = os.path.join(parentFolder, object)
+                # last modified time storec in epoch format in db for simplicity
+                last_mod:float = os.path.getmtime(object)
+                if os.path.isfile(object):
+                    futures.append(executor.submit(
+                        _do_scan_local_file, object, parentFolder, threadSafeDB
+                    ))
+                elif os.path.isdir(object):
+                    cfg.DATABASE.insert_localFile(object, '', 'directory', last_mod)
+                    scan_local_files(os.path.join(object))
+                else:
+                    return  
+            for future in concurrent.futures.as_completed(futures):
+                result = future.result() 
+
+    except Exception as err:
+        logging.error("error scanning local folder %s. %s", (parentFolder, str(err)))
+        print(str(err))  
+
+def _do_scan_local_file(object, parentFolder:str, threadSafeDB:sqlite_store = None):
+    object = os.path.join(parentFolder, object)
+    # last modified time storec in epoch format in db for simplicity
+    last_mod:float = os.path.getmtime(object)
+    if os.path.isfile(object):
+        # multi-thread this too
+        md5 = hash_file(object)
+        if threadSafeDB is not None:
+            threadSafeDB.insert_localFile(object, md5, "file", last_mod)
+        else:
+            cfg.DATABASE.insert_localFile(object, md5, "file", last_mod)
+    else:
+        return   
+
+def scan_local_files(parentFolder:str):
+    try:
+        objects = os.listdir(parentFolder)
+        for object in objects:
+            object = os.path.join(parentFolder, object)
+            # last modified time storec in epoch format in db for simplicity
+            last_mod:float = os.path.getmtime(object)
+            if os.path.isfile(object):
+                # multi-thread this too
+                md5 = hash_file(object)
+                cfg.DATABASE.insert_localFile(object, md5, "file", last_mod)
+            elif os.path.isdir(object):
+                cfg.DATABASE.insert_localFile(object, '', 'directory', last_mod)
+                scan_local_files(os.path.join(object))
+            else:
+                return   
+
+    except Exception as err:
+        logging.error("error scanning local folder %s. %s", (parentFolder, str(err)))
+        print(str(err))  
 
 # duplicate google drive directory structure to the local target directory
 def copy_folder_tree(rootFolder:gFolder, destPath:str):
