@@ -277,6 +277,7 @@ def main():
     cfg.ROOT_FOLDER_ID = rootFolder.id
     #global ROOT_FOLDER_OBJECT 
     cfg.ROOT_FOLDER_OBJECT = rootFolder
+    cfg.ROOT_FOLDER_OBJECT.localPath = cfg.DRIVE_CACHE_PATH + rootFolder.name
 
     cfg.DATABASE.open(dbPath=cfg.DATABASE_PATH)
     rootFolder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, rootFolder.name)
@@ -299,6 +300,8 @@ def main():
 
     # read the local cache and create linked folder tree objects
     folders = read_folder_cache_from_db()
+
+    upload_new_local_files(service)
 
     """
     ***********************************************************************************
@@ -345,6 +348,13 @@ def main():
     # ^^^^
     # there are some weird change sets things happening with the above.  need to figure out how filter those out or merge them
     # ******
+
+    # ****************************************************************************
+    #          get local changes that are newer than what's in the cloud
+    # ****************************************************************************
+    # this gets done after the cloud sync is done and the database is current
+    upload_new_local_files()
+
 
     # start tracking changes
     #global CHANGES_TOKEN

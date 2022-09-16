@@ -338,7 +338,7 @@ def get_google_object(service, id:str):
    
 
 # create folder in Google Drive
-def create_drive_folder(service, folderName:str, parentId:str=None) -> gFolder:
+def create_drive_folder(service, folderName:str, localPath:str, parentId:str=None) -> gFolder:
     folder = None
     try:
 
@@ -353,6 +353,8 @@ def create_drive_folder(service, folderName:str, parentId:str=None) -> gFolder:
         logging.info("creating folder %s in Google Drive" % folderName)
         f = service.files().create(body=file_metadata, fields='*').execute()
         folder = gFolder(f)
+        folder.localPath = localPath
+        cfg.DATABASE.insert_gObject(folder=folder)
 
     except HttpError as err:
         logging.error("error creating Google Drive folder. %s" % str(err))
@@ -361,8 +363,38 @@ def create_drive_folder(service, folderName:str, parentId:str=None) -> gFolder:
 
     return folder
 
+# create the entire folder tree, if any part doesn't exist
+def create_drive_folder_tree(service, folderPath:str) -> gFolder:
+    parentFolder = None
+    try:
+        if cfg.DRIVE_CACHE_PATH not in cfg.ROOT_FOLDER_OBJECT.localPath:
+            raise "folder path isn't the defined drive cache path."
+            return
+        folderPath = folderPath.replace(cfg.ROOT_FOLDER_OBJECT.localPath + "/", "")
+        folders = folderPath.split(os.sep)
+        parent = cfg.ROOT_FOLDER_OBJECT
+        currentFolder = cfg.ROOT_FOLDER_OBJECT.localPath
+        for folder in folders:
+            currentFolder = os.path.join(currentFolder, folder)
+            dbFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField="local_path", \
+                            searchCriteria=currentFolder)
+            if len(dbFolders) == 0:
+                parent = create_drive_folder(service, folder, currentFolder, parent.id)
+            else:
+                parent = dbFolders[0]
 
-def upload_file(service, filePath:str, parentId:str = None)-> gFile:
+
+        parentFolder = parent
+
+    except HttpError as err:
+        logging.error("error creating Google Drive folder tree. %s" % str(err))
+    except Exception as err:
+        logging.error("error creating Google Drive folder tree. %s" % str(err))
+    return parentFolder
+
+
+
+def upload_drive_file(service, filePath:str, parentId:str = None)-> gFile:
     file = None
     attempt = 1
     try:
@@ -411,6 +443,33 @@ def upload_file_simple(service, filePath:str, parentId:str=None)->gFile:
     except Exception as err:
         logging.error("error downing a simple file upload to Google Drive. %s" % str(err))
     return file
+
+
+# uploads new files that have been identified as missing from the cloud post reconciliation
+def upload_new_local_files(service):
+    logging.debug("starting to upload new local files to the cloud.")
+    try:
+        new_local_files, records = cfg.DATABASE.fetch_newLocalFiles()
+        recordsParsed = 0
+        while records > 0:
+            for f in new_local_files:
+                if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
+                    return
+                else:
+                    parentFolder = os.path.dirname(f.localPath)
+                    db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                                                searchCriteria=parentFolder)
+                    db_parentFolder = db_parentFolders[0]
+                    if db_parentFolder is not None:
+                        f.properties['parents'] = [db_parentFolder.id]
+                    else:
+                        parent = create_drive_folder_tree(service, parentFolder)
+                        f.properties['parents'] = parent.id
+                    file = upload_drive_file(service, f.localPath, f.properties['parents'][0])
+                recordsParsed += 1
+            new_local_files, records = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
+    except Exception as err:
+        logging.error("error uploading new files to the cloud. %s" % str(err))
 
 
 def delete_gdrive_file(service, file:gFile):

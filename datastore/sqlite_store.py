@@ -1,4 +1,4 @@
-import mimetypes
+
 import sqlite3
 from sqlite3 import SQLITE_PRAGMA, Error
 import logging
@@ -6,12 +6,14 @@ from typing import List
 import json
 import sys
 import os
+import datetime
 
 
 current = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current)
 sys.path.append(parent)
 from gDrive_data_structures.data_types import *
+from config import config as cfg
 
 class sqlite_store:
     def __init__(self):
@@ -45,8 +47,6 @@ class sqlite_store:
                                 mime_type text NOT NULL, \
                                 last_mod real NOT NULL);"
 
-            procInsertObject_sql = "INSERT INTO gObjects\
-                                    (id, Name, Joining_date, salary) VALUES (%s,%s,%s,%s)"
             
             self.cursor = self.conn.cursor()
             self.cursor.execute(gObjectTable_sql)
@@ -55,6 +55,43 @@ class sqlite_store:
             self.conn.commit()
             self.cursor.execute(localFiles_sql)
             self.conn.commit()
+
+            # files that exist locally but not in drive (via the db)
+            views_sql = "CREATE VIEW IF NOT EXISTS v_files_local_but_not_in_db \
+                            AS \
+                            SELECT local_files.id, \
+                                local_files.path, \
+                                local_files.md5, \
+                                local_files.mime_type, \
+                                local_files.last_mod \
+                            FROM local_files \
+                            LEFT JOIN gObjects \
+                            ON local_files.path = gObjects.local_path \
+                            AND local_files.md5 = gObjects.md5 \
+                            WHERE (gObjects.md5 is null \
+                            OR gObjects.local_path is null) \
+                            AND local_files.mime_type != 'directory';"
+
+            self.cursor.execute(views_sql)
+            self.conn.commit()
+
+            #files where local files are newer than the files in drive and hashes don't match
+            views_sql = "CREATE VIEW IF NOT EXISTS v_files_modified_locally \
+                            AS \
+                            SELECT ocal_files.id, \
+                                local_files.path, \
+                                local_files.md5, \
+                                local_files.mime_type, \
+                                local_files.last_mod \
+                            FROM local_files \
+                            LEFT JOIN gObjects \
+                            ON local_files.md5 != gObjects.md5 \
+                            AND local_files.path = gObjects.local_path \
+                            WHERE cast(strftime('%s', json_extract(gObjects.properties, '$.modifiedTime')) as integer) < \
+                            cast(local_files.last_mod as integer);"
+            self.cursor.execute(views_sql)
+            self.conn.commit()
+
         except sqlite3.Error as error:
             logging.error("error creating database schema %s." % str(err))
         except Exception as err:
@@ -129,6 +166,104 @@ class sqlite_store:
             logging.error("Unable to fetch relationships for id %s. %s" % (id, str(e)))
 
         return parents
+
+    def fetch_newLocalFiles(self, pageSize:int = 100, offset:int = 0):
+        logging.debug("fetching files that exist locally but not in the cloud.")
+        results = []
+        totalFetched = 0
+        try:
+            fetch_sql = "SELECT id, \
+                            path, \
+                            md5, \
+                            mime_type, \
+                            last_mod \
+                        FROM v_files_local_but_not_in_db LIMIT ? OFFSET ?;"
+            sqlParams = (pageSize, offset)
+            self.cursor.execute(fetch_sql, sqlParams)
+            rows = self.cursor.fetchall()
+            for row in rows:
+                try:
+                    if row[3] == 'directory':
+                        temp = {
+                            "id": "_local_" + str(row[0]),
+                            "name": os.path.basename(row[1]),
+                            "mimeType": cfg.TYPE_GOOGLE_FOLDER,
+                            "properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
+                        }
+                        f = gFile(temp)
+                        f.localPath = row[1]
+                    else:
+                        # build a temp object struct
+                        temp = {
+                            "id": "_local_" + str(row[0]),
+                            "name": os.path.basename(row[1]),
+                            "mimeType": "",
+                            "properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
+                        }
+                        f = gFile(temp)
+                        f.localPath = row[1]
+                        f.md5 = row[2]
+                    results.append(f)
+                    totalFetched +=1
+                except Exception as err:
+                    logging.error("unable to fetch db object and construct the appropriate structure. %s" % str(err))
+
+
+        except sqlite3.Error as e:
+            logging.error("Unable to fetch records. %s" % str(e))
+        except Exception as e:
+            logging.error("Unable to fetch records. %s" % str(e))
+        
+        return results, totalFetched
+
+    def fetch_changedLocalFiles(self, pageSize:int = 100, offset:int = 0):
+        logging.debug("fetching local files that are newer vs what's in the cloud.")
+        results = []
+        totalFetched = 0
+        try:
+            fetch_sql = "SELECT id, \
+                            path, \
+                            md5, \
+                            mime_type, \
+                            last_mod \
+                        FROM v_files_modified_locally LIMIT ? OFFSET ?;"
+            sqlParams = (pageSize, offset)
+            self.cursor.execute(fetch_sql, sqlParams)
+            rows = self.cursor.fetchall()
+            for row in rows:
+                try:
+                    if row[3] == 'directory':
+                        temp = {
+                            "id": "_local_" + str(row[0]),
+                            "name": os.path.basename(row[1]),
+                            "mimeType": cfg.TYPE_GOOGLE_FOLDER,
+                            "properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
+                        }
+                        f = gFile(temp)
+                        f.localPath = row[1]
+                    else:
+                        # build a temp object struct
+                        temp = {
+                            "id": "_local_" + str(row[0]),
+                            "name": os.path.basename(row[1]),
+                            "mimeType": "",
+                            "properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
+                        }
+                        f = gFile(temp)
+                        f.localPath = row[1]
+                        f.md5 = row[2]
+                    results.append(f)
+                    totalFetched +=1
+                except Exception as err:
+                    logging.error("unable to fetch db object and construct the appropriate structure. %s" % str(err))
+
+
+        except sqlite3.Error as e:
+            logging.error("Unable to fetch records. %s" % str(e))
+        except Exception as e:
+            logging.error("Unable to fetch records. %s" % str(e))
+        
+        return results, totalFetched
     
     def fetch_gObjectSet(self, pageSize:int = 100, offset:int=0, searchField:str = None, searchCriteria:str=None):
         gObjects = []

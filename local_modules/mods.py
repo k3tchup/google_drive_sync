@@ -14,6 +14,7 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 from gDrive_data_structures.data_types import *
 from datastore.sqlite_store import *
+from gDrive_modules.gDrive import *
 from config import config as cfg
 
 # gets the md5 hash of a file
@@ -188,6 +189,7 @@ def copy_folder_tree(rootFolder:gFolder, destPath:str):
     else:
         return
 
+
 def update_db_folder_paths():
     try:
         folders, count = cfg.DATABASE.fetch_gObjectSet(searchField = 'mime_type', searchCriteria = '%folder%')
@@ -223,3 +225,4 @@ def update_db_folder_paths():
 
     except Exception as err:
         logging.error("error updating local paths of folders in the database. %s" % str(err))
+
