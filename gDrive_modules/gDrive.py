@@ -453,19 +453,22 @@ def upload_new_local_files(service):
         recordsParsed = 0
         while records > 0:
             for f in new_local_files:
-                if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
-                    return
-                else:
-                    parentFolder = os.path.dirname(f.localPath)
-                    db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
-                                                searchCriteria=parentFolder)
-                    db_parentFolder = db_parentFolders[0]
-                    if db_parentFolder is not None:
-                        f.properties['parents'] = [db_parentFolder.id]
+                if cfg.ROOT_FOLDER_OBJECT.localPath in f.localPath:
+                    if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
+                        return
                     else:
-                        parent = create_drive_folder_tree(service, parentFolder)
-                        f.properties['parents'] = parent.id
-                    file = upload_drive_file(service, f.localPath, f.properties['parents'][0])
+                        parentFolder = os.path.dirname(f.localPath)
+                        db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                                                    searchCriteria=parentFolder)
+                        db_parentFolder = db_parentFolders[0]
+                        if db_parentFolder is not None:
+                            f.properties['parents'] = [db_parentFolder.id]
+                        else:
+                            parent = create_drive_folder_tree(service, parentFolder)
+                            f.properties['parents'] = parent.id
+                        file = upload_drive_file(service, f.localPath, f.properties['parents'][0])
+                else:
+                    logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
                 recordsParsed += 1
             new_local_files, records = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
     except Exception as err:

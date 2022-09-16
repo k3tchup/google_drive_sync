@@ -301,8 +301,6 @@ def main():
     # read the local cache and create linked folder tree objects
     folders = read_folder_cache_from_db()
 
-    upload_new_local_files(service)
-
     """
     ***********************************************************************************
     Do a full scan of Google drive for any files missing locally
