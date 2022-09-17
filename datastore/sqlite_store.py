@@ -78,11 +78,12 @@ class sqlite_store:
             #files where local files are newer than the files in drive and hashes don't match
             views_sql = "CREATE VIEW IF NOT EXISTS v_files_modified_locally \
                             AS \
-                            SELECT ocal_files.id, \
-                                local_files.path, \
-                                local_files.md5, \
-                                local_files.mime_type, \
-                                local_files.last_mod \
+                            SELECT gObjects.id, \
+                                gObjects.local_path, \
+                                gObjects.md5, \
+                                gObjects.mime_type, \
+                                local_files.last_mod, \
+                                gObjects.properties \
                             FROM local_files \
                             LEFT JOIN gObjects \
                             ON local_files.md5 != gObjects.md5 \
@@ -222,32 +223,33 @@ class sqlite_store:
         totalFetched = 0
         try:
             fetch_sql = "SELECT id, \
-                            path, \
+                            local_path, \
                             md5, \
                             mime_type, \
-                            last_mod \
+                            last_mod, \
+                            properties \
                         FROM v_files_modified_locally LIMIT ? OFFSET ?;"
             sqlParams = (pageSize, offset)
             self.cursor.execute(fetch_sql, sqlParams)
             rows = self.cursor.fetchall()
             for row in rows:
                 try:
-                    if row[3] == 'directory':
+                    if row[3] == cfg.TYPE_GOOGLE_FOLDER:
                         temp = {
-                            "id": "_local_" + str(row[0]),
+                            "id": str(row[0]),
                             "name": os.path.basename(row[1]),
-                            "mimeType": cfg.TYPE_GOOGLE_FOLDER,
-                            "properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
+                            "mimeType": cfg.TYPE_GOOGLE_FOLDER
+                            #"properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
                         }
                         f = gFile(temp)
                         f.localPath = row[1]
                     else:
                         # build a temp object struct
                         temp = {
-                            "id": "_local_" + str(row[0]),
+                            "id": str(row[0]),
                             "name": os.path.basename(row[1]),
-                            "mimeType": "",
-                            "properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
+                            "mimeType": row[3]
+                            #"properties": { 'modifiedTime': str(datetime.datetime.fromtimestamp(row[4]).strftime('%Y-%m-%dT%H:%M:%S.%sZ')) }
                         }
                         f = gFile(temp)
                         f.localPath = row[1]

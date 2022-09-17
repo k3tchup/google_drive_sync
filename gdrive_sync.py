@@ -285,6 +285,7 @@ def main():
 
 
     #update_db_folder_paths()
+    #update_drive_files(service)
 
     #logging.info("clearing the local folder cache")
     #clearFolderCache(FOLDERS_CACHE_PATH)
@@ -296,7 +297,12 @@ def main():
     #  testing ground
     # **************************************************************
     #newFolder = create_drive_folder(service, "test5")
-    #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')
+    #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')  
+    
+
+    # **************************************************************
+    #  end testing ground
+    # **************************************************************
 
     # read the local cache and create linked folder tree objects
     folders = read_folder_cache_from_db()
@@ -351,7 +357,9 @@ def main():
     #          get local changes that are newer than what's in the cloud
     # ****************************************************************************
     # this gets done after the cloud sync is done and the database is current
-    upload_new_local_files()
+    logging.info("looking for local files that need to be added or updated in Google Drive")
+    upload_new_local_files(service)
+    update_drive_files(service)
 
 
     # start tracking changes
@@ -372,7 +380,7 @@ def main():
                 # grab full metadata for all the files first so that we can make informed decisions on the fly
                 enrichedChanges = []
                 for change in changes:
-                    gObject = get_google_object(service, change['fileId'])
+                    gObject = get_drive_object(service, change['fileId'])
                     enrichedChanges.append(gObject)
 
                 # handle removes first
@@ -397,7 +405,7 @@ def main():
                     full_path = ""
                     if changes[i]['removed'] == False:
                         if changes[i]['file']['mimeType'] == cfg.TYPE_GOOGLE_FOLDER:
-                            folder = get_google_object(service, changes[i]['fileId']) 
+                            folder = get_drive_object(service, changes[i]['fileId']) 
                             handle_changed_folder(service, folder)
                             changes.pop(i)
                     else:
@@ -407,7 +415,7 @@ def main():
                 for change in changes:
                     if not change['removed'] == True:
                         if cfg.TYPE_GOOGLE_APPS not in change['file']['mimeType']:
-                            file = get_google_object(service, changes[i]['fileId'])
+                            file = get_drive_object(service, changes[i]['fileId'])
                             handle_changed_file(service, file)
 
                     else:

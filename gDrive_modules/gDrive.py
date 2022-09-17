@@ -313,7 +313,7 @@ def do_full_download(service, folder: gFolder, targetPath:str):
     
 
 # retrieve the metadata for Google object (file or folder)
-def get_google_object(service, id:str):
+def get_drive_object(service, id:str):
     return_object = None
     try:
         gServiceFiles = service.files()
@@ -403,15 +403,15 @@ def upload_drive_file(service, filePath:str, parentId:str = None)-> gFile:
             fileSize = os.path.getsize(filePath)
             fileHash = hash_file(filePath)
             if fileSize <= (5 * 1024 * 1024):
-                f = upload_file_simple(service, filePath, parentId)
+                f = upload_drive_file_simple(service, filePath, parentId)
             else:
                 # we need to figure out how to resumable uploads at some point later
-                f = upload_file_simple(service, filePath, parentId)
+                f = upload_drive_file_simple(service, filePath, parentId)
             file = gFile(f)
             if fileHash != file.properties['md5Checksum']:
                 logging.warning("File upload resulted in a hash mismatch.")
                 # remove the file
-                file = delete_gdrive_file(service, file)
+                file = delete_drive_file(service, file)
                 attempt += 1
             else:
                 file.localPath = filePath
@@ -426,7 +426,7 @@ def upload_drive_file(service, filePath:str, parentId:str = None)-> gFile:
         logging.error("error uploading file to Google Drive. %s" % str(err))
     return file
 
-def upload_file_simple(service, filePath:str, parentId:str=None)->gFile:
+def upload_drive_file_simple(service, filePath:str, parentId:str=None)->gFile:
     file = None
     try:
         if parentId is None or parentId == "":
@@ -435,7 +435,7 @@ def upload_file_simple(service, filePath:str, parentId:str=None)->gFile:
         fileName = os.path.basename(filePath)
         logging.info("performing simple upload of file '%s'" % filePath)
         file_metadata = {'name': fileName, 'parents': (parentId, )}
-        media = MediaFileUpload(filePath)
+        media = MediaFileUpload(filePath, resumable=True)
         file = service.files().create(body=file_metadata, media_body=media,
                                       fields='*').execute()
     except HttpError as err:
@@ -474,8 +474,59 @@ def upload_new_local_files(service):
     except Exception as err:
         logging.error("error uploading new files to the cloud. %s" % str(err))
 
+def update_drive_file(service, file:gFile, localPath:str):
+    logging.info("updating Google drive file %s." % file.name)
+    updated_file = None
+    try:
+        media_body = MediaFileUpload(localPath, resumable=True)
 
-def delete_gdrive_file(service, file:gFile):
+        # Send the request to the API.
+        updated_file = service.files().update(
+            fileId=file.id,
+            #body=file.properties,
+            media_body=media_body).execute()
+        # get the encriched full metadata
+        updated_file = get_drive_object(service, updated_file['id'])
+        updated_file.localPath = file.localPath
+        updated_file.md5 = file.md5
+
+        cfg.DATABASE.update_gObject(file=updated_file)
+
+    except HttpError as err:
+        logging.error("error updating Google drive file '%s'. %s" % (file.name, str(err)))
+    except Exception as err:
+        logging.error("error updating Google drive file '%s'. %s" % (file.name, str(err)))
+    return updated_file 
+
+def update_drive_files(service):
+    logging.debug("starting to update changed local files to the cloud.")
+    try:
+        changed_local_files, records = cfg.DATABASE.fetch_changedLocalFiles()
+        recordsParsed = 0
+        while records > 0:
+            for f in changed_local_files:
+                if cfg.ROOT_FOLDER_OBJECT.localPath in f.localPath:
+                    if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
+                        return
+                    else:
+                        #parentFolder = os.path.dirname(f.localPath)
+                        #db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                        #                            searchCriteria=parentFolder)
+                        #db_parentFolder = db_parentFolders[0]
+                        #if db_parentFolder is not None:
+                        #    f.properties['parents'] = [db_parentFolder.id]
+                        #else:
+                        #    parent = create_drive_folder_tree(service, parentFolder)
+                        #    f.properties['parents'] = parent.id
+                        file = update_drive_file(service, f, f.localPath)
+                else:
+                    logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
+                recordsParsed += 1
+            changed_local_files, records = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
+    except Exception as err:
+        logging.error("error updating cloudfile '%s'. %s" % (f.name, str(err)))
+
+def delete_drive_file(service, file:gFile):
     file = None
     try:
         file.properties['trashed'] = True
@@ -552,7 +603,7 @@ def handle_changed_file(service, file:gFile = None):
                 cfg.DATABASE.insert_gObject(file=file)
                 if 'parents' in file.properties.keys():
                     for parent_id in file.properties['parents']:
-                        parent_folder = get_google_object(service, parent_id)
+                        parent_folder = get_drive_object(service, parent_id)
                         full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                             get_full_folder_path(service, parent_folder), \
                             file.name)
@@ -573,13 +624,13 @@ def handle_changed_file(service, file:gFile = None):
                             if 'parents' in file.properties.keys():
                                 for parent_id in file.properties['parents']:
                                     for db_parent_id in dbFile.properties['parents']:
-                                        parent_folder = get_google_object(service, parent_id)
+                                        parent_folder = get_drive_object(service, parent_id)
                                         root_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                             get_full_folder_path(service, parent_folder))
                                         full_path = os.path.join(root_path, file.name)
                                         full_path = os.path.expanduser(full_path)
 
-                                        parent_folder = get_google_object(service, db_parent_id)
+                                        parent_folder = get_drive_object(service, db_parent_id)
                                         root_path_old = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                             get_full_folder_path(service, parent_folder))
                                         full_path_old = os.path.join(root_path_old, dbFile.name)
@@ -610,7 +661,7 @@ def handle_changed_file(service, file:gFile = None):
                         if 'parents' in file.properties.keys():
                             for parent_id in file.properties['parents']:
                                 try:
-                                    parent_folder = get_google_object(service, parent_id)
+                                    parent_folder = get_drive_object(service, parent_id)
                                     full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                         get_full_folder_path(service, parent_folder), \
                                         file.name)
@@ -646,7 +697,7 @@ def handle_changed_folder(service, folder: gFolder = None):
                 cfg.DATABASE.insert_gObject(folder=folder)
                 if 'parents' in folder.properties.keys():
                     for parent_id in folder.properties['parents']:
-                        parent_folder = get_google_object(service, parent_id)
+                        parent_folder = get_drive_object(service, parent_id)
                         full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                             get_full_folder_path(service, parent_folder), \
                             folder.name)
@@ -664,16 +715,16 @@ def handle_changed_folder(service, folder: gFolder = None):
                     folder.localPath = os.path.join(cfg.DRIVE_CACHE_PATH, get_full_folder_path(service, folder))
                     cfg.DATABASE.update_gObject(folder=folder)
                     # **** rename the local folder(s) ****
-                    if folder.name != dbFolder.name:
+                    if folder.name != dbFolder.name and folder.properties['trashed'] == False:
                         for parent_id in folder.properties['parents']:
                             for db_parent_id in dbFolder.properties['parents']:
-                                parent_folder = get_google_object(service, parent_id)
+                                parent_folder = get_drive_object(service, parent_id)
                                 root_path_new = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                     get_full_folder_path(service, parent_folder))
                                 full_path_new = os.path.join(root_path_new, folder.name)
                                 full_path_new = os.path.expanduser(full_path_new)
 
-                                parent_folder = get_google_object(service, db_parent_id)
+                                parent_folder = get_drive_object(service, db_parent_id)
                                 root_path_old = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                     get_full_folder_path(service, parent_folder))
                                 full_path_old = os.path.join(root_path_old, dbFolder.name)
@@ -686,18 +737,18 @@ def handle_changed_folder(service, folder: gFolder = None):
                     if folder.properties['trashed'] == True:
                         if 'parents' in folder.properties.keys():
                             for parent_id in folder.properties['parents']:
-                                parent_folder = get_google_object(service, parent_id)
+                                parent_folder = get_drive_object(service, parent_id)
                                 full_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
                                     get_full_folder_path(service, parent_folder), \
                                     folder.name)
                                 full_path = os.path.expanduser(full_path)
                                 if os.path.exists(full_path):
-                                    if len(os.listdir(full_path)) == 0:
-                                        logging.info("removing trashed directory '%s'" % full_path)
-                                        #os.rmdir(full_path)
-                                        shutil.rmtree(full_path)
-                                    else:
-                                        logging.warning("unable to remove trashed dir '%s'. not empty" % full_path) 
+                                    #if len(os.listdir(full_path)) == 0:
+                                    logging.info("removing trashed directory '%s'" % full_path)
+                                    #os.rmdir(full_path)
+                                    shutil.rmtree(full_path)
+                                    #else:
+                                    #    logging.warning("unable to remove trashed dir '%s'. not empty" % full_path) 
                             
     except Exception as err:
         logging.error("error processing Google object change. %s" % str(err))

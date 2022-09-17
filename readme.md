@@ -71,9 +71,9 @@ The requirements.txt should list the remainder of the requirements.
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
 
-[ ] change handling currently redownloads the file and then deletes it.  this is ineffecient, optimize this.
+[x] change handling currently redownloads the file and then deletes it.  this is ineffecient, optimize this.
 
-[ ] upload files
+[x] upload files
 
 [ ] resumable uploads (in case the connection fails)
 
