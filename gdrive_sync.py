@@ -26,6 +26,7 @@ from datastore.sqlite_store import *
 from config import config as cfg
 from gDrive_modules.gDrive import *
 from local_modules.mods import *
+from local_modules.filewatcher import *
 
 # scans all files in Google drive that aren't in the db.  that's our change set.
 def get_gdrive_changes(service) -> List:
@@ -94,9 +95,15 @@ def get_gdrive_changes(service) -> List:
                             differences.append(full_file)
             request = gServiceFiles.list_next(request, files_page)
     except HttpError as err:
+        #exc_type, exc_obj, exc_tb = sys.exc_info()
+        #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        #logging.error(exc_type, fname, exc_tb.tb_lineno)
         logging.error("error scanning google drive files. %s" % str(err))
         print(err)
     except Exception as err:
+        #exc_type, exc_obj, exc_tb = sys.exc_info()
+        #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        #logging.error(exc_type, fname, exc_tb.tb_lineno)
         logging.error("error scanning google drive files. %s" % str(err))
         print(err)
     return differences
@@ -205,6 +212,11 @@ def main():
     if not os.path.exists(cfg.DATABASE_PATH):
         cfg.DATABASE.create_db(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
 
+
+    # max threads
+    #global MAX_THREADS
+    cfg.MAX_THREADS = os.cpu_count() - 1
+    logging.info("initializing %d threads", cfg.MAX_THREADS)
     
     """
     ********************************************************************
@@ -214,54 +226,7 @@ def main():
     - supports granting consent to the scopes requested in a browser window (interactive)
     ********************************************************************
     """
-
-    logging.info("initializing application credentials")
-    creds = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    logging.debug("looking for the an existing token in" + cfg.TOKEN_CACHE)
-    if os.path.exists(cfg.TOKEN_CACHE):
-        creds = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
-        with open(cfg.TOKEN_CACHE, 'r') as tokenFile:
-            token = json.loads(tokenFile.read())
-            if token['scopes'] != cfg.TARGET_SCOPES:
-                logging.warning("token cache scopes are not valid, removing token")
-                creds = None
-                os.remove(cfg.TOKEN_CACHE)
-            '''
-            # not the actual refresh token expiration.  how do we get that?   
-            tokenExpires = datetime.strptime(token['expiry'], "%Y-%m-%dT%H:%M:%S.%fZ")
-            
-            if datetime.now() > tokenExpires:
-                logging.warning("token cache has expired.")
-                creds = None
-                os.remove(TOKEN_CACHE)
-            '''
-    # max threads
-    #global MAX_THREADS
-    cfg.MAX_THREADS = os.cpu_count() - 1
-    logging.info("initializing %d threads", cfg.MAX_THREADS)
-
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        logging.warning("valid credentials weren't found, initialize oauth consent")
-        try:
-            if creds and creds.expired and creds.refresh_token:
-                try:
-                    creds.refresh(Request())
-                except HttpError as err:
-                    logging.error("error logging in to google drive. %s" % str(err))
-                    print(err)                
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(cfg.APP_CREDS, cfg.TARGET_SCOPES)
-                creds = flow.run_local_server(port=0)
-            # Save the credentials for the next run
-            with open(cfg.TOKEN_CACHE, 'w+') as token:
-                logging.debug("saving credentials to " + cfg.TOKEN_CACHE)
-                token.write(creds.to_json())
-        except HttpError as err:
-            print(err)
+    creds = login_to_drive()
     
     # cache tokens globally for multi-threading
     #global CREDENTIALS
@@ -298,7 +263,9 @@ def main():
     # **************************************************************
     #newFolder = create_drive_folder(service, "test5")
     #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')  
-    
+    observer = Watcher(service)
+    observer.run()
+   
 
     # **************************************************************
     #  end testing ground
@@ -424,8 +391,9 @@ def main():
                 
             except Exception as err:
                 logging.error("error parsing change set. %s" % str(err))
-            sleep(5)
+            sleep(cfg.POLLING_INTERVAL)
     except KeyboardInterrupt:
+        # need to stop Observer first
         pass
 
 

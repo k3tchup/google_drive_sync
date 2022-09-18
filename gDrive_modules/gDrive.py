@@ -28,6 +28,50 @@ from datastore.sqlite_store import *
 from local_modules.mods import *
 from config import config as cfg
 
+def login_to_drive():
+    logging.info("initializing application credentials")
+    creds = None
+    # The file token.json stores the user's access and refresh tokens, and is
+    # created automatically when the authorization flow completes for the first
+    # time.
+    logging.debug("looking for the an existing token in" + cfg.TOKEN_CACHE)
+    if os.path.exists(cfg.TOKEN_CACHE):
+        creds = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
+        with open(cfg.TOKEN_CACHE, 'r') as tokenFile:
+            token = json.loads(tokenFile.read())
+            if token['scopes'] != cfg.TARGET_SCOPES:
+                logging.warning("token cache scopes are not valid, removing token")
+                creds = None
+                os.remove(cfg.TOKEN_CACHE)
+
+    # If there are no (valid) credentials available, let the user log in.
+    if not creds or not creds.valid:
+        logging.warning("valid credentials weren't found, initializing oauth consent from in default browser.")
+        try:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except HttpError as err:
+                    logging.error("error logging in to google drive. %s" % str(err))
+                except Exception as err:
+                    # if refersh token expired, remove the token cache and rerun self
+                    if 'invalid_grant: Token has been expired or revoked.' in err.args[0]:
+                        logging.warning("oauth refresh token expired, clearing token cache.")
+                        os.remove(cfg.TOKEN_CACHE)
+                        login_to_drive()
+                    logging.error("error logging in to Google Drive. %s" % str(err))  
+            else:
+                flow = InstalledAppFlow.from_client_secrets_file(cfg.APP_CREDS, cfg.TARGET_SCOPES)
+                creds = flow.run_local_server(port=0)
+            # Save the credentials for the next run
+            with open(cfg.TOKEN_CACHE, 'w+') as token:
+                logging.debug("saving credentials to " + cfg.TOKEN_CACHE)
+                token.write(creds.to_json())
+        except HttpError as err:
+            print(err)
+    
+    return creds
+
 # Create a new Http() object for every request
 # https://googleapis.github.io/google-api-python-client/docs/thread_safety.html
 # overrides the constructor of the http2 object 

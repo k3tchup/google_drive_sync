@@ -22,6 +22,8 @@ https://www.googleapis.com/auth/activity
   * export of native Google Apps files, like Docs and Sheets.
   * hash verify the files
   * continuous monitoring for Drive for any changes and updating of local versions accordingly
+* Upload local files to Google drive
+  * track changed local files by hash and upload them to Drive
 * Sqlite database for metadata data storage 
 * Handle incremental changes by subscribing to Google Drive change tokens
 * Fetches files not owned by the Drive owner into a separate local folder
@@ -81,6 +83,8 @@ The requirements.txt should list the remainder of the requirements.
 
 [ ] delete files remotely
 
+[ ] add local file watcher to detect changes to the cache folder immediately
+
 [ ] clear out trashed files after they expire on Google's side
 
 [ ] there are instances when folders with the same name just inherit the same id when a few folder is crated with the same name.  need to debug this.
@@ -109,3 +113,5 @@ The requirements.txt should list the remainder of the requirements.
 - don't need to fetch full metadata all the time
 - what can be cached locally?
 - is there a way to optimize the get_media() function?
+
+[ ] add vacuum command to the sqlite db routines to keep its size in check
