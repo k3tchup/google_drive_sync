@@ -34,6 +34,8 @@ This code was written with Python 3.8.   Google Drive API requires Python 3.7 pl
 
 The requirements.txt should list the remainder of the requirements. 
 
+The OS keyring is used to stored the access and refresh tokens.  This must be set up ahead of time.   For WSL, install python3-keyrings.alt.
+
 ## To-do (work in progress)
 
 [x] connect, manage scopes, tokens, credentials
@@ -46,10 +48,32 @@ The requirements.txt should list the remainder of the requirements.
 
 [x] download non native apps files
 
-[ ] initial download of the entire drive
+[x] initial download of the entire drive
 
-- mostly there
-- need some sort of progress estimate.   what's the size of the total download set?  compare to what's downloaded.
+[x] checksum / hash verfication of downloaded files
+
+[x] a local sqlite db to keep track of all the file versions and metadata?
+
+[x] multi-threading for downloads
+
+[x] don't bother going through the merge routines if the dest folder is empty, would save a bunch of time
+
+[x] change handling currently redownloads the file and then deletes it.  this is ineffecient, optimize this.
+
+[x] upload files
+
+[x] delete files locally
+
+[x] version handling so we don't transfer files we don't need to.   there are version numbers in the metadata
+
+[x] subscribe to change notifications provided by Google drive
+
+[x] logging 
+- will need some improvement as we get going
+
+[x] settings managed in a config file
+
+[ ] progress estimates for large downloads and uploads (both large by size and by number of files)
 
 [ ] write export function to export google apps content.  need to adjust the mime type for the correct content.  examples below
 ```
@@ -59,17 +83,7 @@ The requirements.txt should list the remainder of the requirements.
 - mostly there
 - still need to add more supported foramts. what are they?
 
-[x] checksum / hash verfication of downloaded files
-
 [ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  
-
-[x] do we want a local sqlite db to keep track of all the file versions and metadata?
-- Will likely add additional tables, like for tracking files that errored out.
-- Will probably extend the gObjects table with local file versioning
-
-[x] multi-threading for downloads
-
-[ ] don't bother going through the merge routines if the dest folder is empty, would save a bunch of time
 
 [ ] multi-thread the merge functions
 
@@ -81,13 +95,7 @@ The requirements.txt should list the remainder of the requirements.
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
 
-[x] change handling currently redownloads the file and then deletes it.  this is ineffecient, optimize this.
-
-[x] upload files
-
 [ ] resumable uploads (in case the connection fails)
-
-[x] delete files locally
 
 [ ] delete files remotely
 
@@ -97,22 +105,13 @@ The requirements.txt should list the remainder of the requirements.
 
 [ ] there are instances when folders with the same name just inherit the same id when a few folder is crated with the same name.  need to debug this.
 
-[x] version handling so we don't transfer files we don't need to.   there are version numbers in the metadata
-
-[x] subscribe to change notifications provided by Google drive
-
 [ ] figure out why there are duplicate files with the same name and hash.  something to do with change sets.
 
 [ ] store the token.json contents in a key vault
 
 [ ] move the local database cache and other variable data into the user's home directory
 
-[x] logging 
-- will need some improvement as we get going
-
 [ ] better error handling
-
-[x] settings managed in a config file
 
 [ ] bandwidth management
 - the google modules call http2 classes.  can we just set limits there?

@@ -265,7 +265,9 @@ def main():
     # if this is the first run, skip the merge routine (local path is empty)
     if len(os.listdir(cfg.DRIVE_CACHE_PATH)) == 0:
         logging.info("Local cache folder is empty.  Skipping merge routines and downloading everything.")
-        write_folder_cache(service)
+        folders = read_folder_cache_from_db()
+        if len(folders) == 0:
+            write_folder_cache(service)
         do_full_download(service, cfg.ROOT_FOLDER_OBJECT, cfg.DRIVE_CACHE_PATH)
 
 

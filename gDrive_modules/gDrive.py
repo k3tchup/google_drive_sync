@@ -5,6 +5,7 @@ import os
 import io
 import concurrent.futures
 import shutil
+import keyring
 
 # google and http imports
 from google.auth.transport.requests import Request
@@ -26,6 +27,7 @@ sys.path.append(parent)
 from gDrive_data_structures.data_types import *
 from datastore.sqlite_store import *
 from local_modules.mods import *
+from local_modules.keyring import *
 from config import config as cfg
 
 def login_to_drive():
@@ -34,15 +36,34 @@ def login_to_drive():
     # The file token.json stores the user's access and refresh tokens, and is
     # created automatically when the authorization flow completes for the first
     # time.
-    logging.debug("looking for the an existing token in" + cfg.TOKEN_CACHE)
-    if os.path.exists(cfg.TOKEN_CACHE):
-        creds = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
-        with open(cfg.TOKEN_CACHE, 'r') as tokenFile:
-            token = json.loads(tokenFile.read())
-            if token['scopes'] != cfg.TARGET_SCOPES:
-                logging.warning("token cache scopes are not valid, removing token")
-                creds = None
-                os.remove(cfg.TOKEN_CACHE)
+    if cfg.USE_KEYRING == True:
+        kr = Keyring()
+    else:
+        kr = None
+
+    if cfg.USE_KEYRING == True:
+        logging.debug("looking for and existing token in the OS keyring")
+        try:
+            tokenStr = kr.get_data("gdrive", "token")
+            if tokenStr is not None and tokenStr != "":
+                tokenStr = json.loads(tokenStr)
+                if tokenStr['scopes'] != cfg.TARGET_SCOPES:
+                    creds = None
+                    kr.delete_data("gdrive", "token")
+                else:
+                    creds = Credentials.from_authorized_user_info(tokenStr, cfg.TARGET_SCOPES)
+        except Exception as err:
+            logging.error("Unable to fetch the oauth token from the OS keyring. %s" % str(err))
+    else:
+        logging.debug("looking for an existing token in" + cfg.TOKEN_CACHE)
+        if os.path.exists(cfg.TOKEN_CACHE):
+            creds = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
+            with open(cfg.TOKEN_CACHE, 'r') as tokenFile:
+                token = json.loads(tokenFile.read())
+                if token['scopes'] != cfg.TARGET_SCOPES:
+                    logging.warning("token cache scopes are not valid, removing token")
+                    creds = None
+                    os.remove(cfg.TOKEN_CACHE)
 
     # If there are no (valid) credentials available, let the user log in.
     if not creds or not creds.valid:
@@ -57,16 +78,22 @@ def login_to_drive():
                     # if refersh token expired, remove the token cache and rerun self
                     if 'invalid_grant: Token has been expired or revoked.' in err.args[0]:
                         logging.warning("oauth refresh token expired, clearing token cache.")
-                        os.remove(cfg.TOKEN_CACHE)
+                        if cfg.USE_KEYRING == True:
+                            kr.delete_data("gdrive", "token")
+                        else:
+                            os.remove(cfg.TOKEN_CACHE)
                         login_to_drive()
                     logging.error("error logging in to Google Drive. %s" % str(err))  
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(cfg.APP_CREDS, cfg.TARGET_SCOPES)
                 creds = flow.run_local_server(port=0)
             # Save the credentials for the next run
-            with open(cfg.TOKEN_CACHE, 'w+') as token:
-                logging.debug("saving credentials to " + cfg.TOKEN_CACHE)
-                token.write(creds.to_json())
+            if cfg.USE_KEYRING == True:
+                kr.store_data("gdrive", "token", creds.to_json())
+            else:
+                with open(cfg.TOKEN_CACHE, 'w+') as token:
+                    logging.debug("saving credentials to " + cfg.TOKEN_CACHE)
+                    token.write(creds.to_json())
         except HttpError as err:
             print(err)
     
@@ -283,7 +310,7 @@ def download_files_from_folder(service, folder: gFolder, targetDir: str) -> bool
                         ))
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
-                print(str(result))
+                logging.debug("Download result: %s" % str(result))
             #wait(futures) # want to make sure we don't start too many threads
     except Exception as err:
         logging.error("error downloading directory %s. %s." % (folder.name, str(err)))

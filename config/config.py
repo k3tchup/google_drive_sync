@@ -11,19 +11,29 @@ import logging
 # config variables that can be changed
 LOG_LEVEL = logging.DEBUG
 CONSOLE_LOG_LEVEL = logging.INFO
+LOG_DIRECTORY = "log/"
+
+# tokens and auth
+USE_KEYRING = True
 TOKEN_CACHE = '~/.gdrive_sync/tokens.json'
 APP_CREDS = '~/.gdrive_sync/credentials.json'
+TARGET_SCOPES = ["https://www.googleapis.com/auth/docs",
+            "https://www.googleapis.com/auth/drive", 
+            "https://www.googleapis.com/auth/activity"]
 LPORT = 34888
+
+# metadata paths
 FOLDERS_CACHE_PATH = '~/.gdrive_sync/folders/'
+DATABASE_PATH = '~/.gdrive_sync/md.db'
+
+# local google drive copy path
 DRIVE_CACHE_PATH = "~/gdrive/"
+
+# operation specific variables
 PAGE_SIZE = 50
 FOLDER_FIELDS = 'files(*)'
 FILE_FIELDS = 'files(*)'
 EXPORT_NATIVE_DOCS = False
-LOG_DIRECTORY = "log/"
-TARGET_SCOPES = ["https://www.googleapis.com/auth/docs",
-            "https://www.googleapis.com/auth/drive", 
-            "https://www.googleapis.com/auth/activity"]
 MEDIA_EXPORT_MATRIX = {
             "application/vnd.google-apps.document": { 
                     "targetMimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",    
@@ -34,10 +44,8 @@ MEDIA_EXPORT_MATRIX = {
                     "extension": ".xslx"
             }
 }
-DATABASE_PATH = '~/.gdrive_sync/md.db'
 UPLOAD_RETRIES_MAX = 3
 POLLING_INTERVAL = 5 #seconds
-
 
 # global variables that store dynamic values
 ROOT_FOLDER_ID = ""
