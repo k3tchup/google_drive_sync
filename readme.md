@@ -69,6 +69,14 @@ The requirements.txt should list the remainder of the requirements.
 
 [x] multi-threading for downloads
 
+[ ] don't bother going through the merge routines if the dest folder is empty, would save a bunch of time
+
+[ ] multi-thread the merge functions
+
+[ ] implement a queueing service for dealing with the merges
+
+[ ] store the tokens in a keyring service (use a python module for this)
+
 [ ] multi-thread for uploads
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?

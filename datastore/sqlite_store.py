@@ -117,7 +117,7 @@ class sqlite_store:
             self.conn = sqlite3.connect(dbPath, check_same_thread=False)
             self.__create_schema()
         except sqlite3.Error as error:
-            logging.error("unable to create databaase %s. %s" % (dbPath, str(e)))
+            logging.error("unable to create database %s. %s" % (dbPath, str(e)))
         except Exception as e:
             logging.error("unable to create databaase %s. %s" % (dbPath, str(e)))
 

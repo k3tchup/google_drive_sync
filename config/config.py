@@ -11,10 +11,10 @@ import logging
 # config variables that can be changed
 LOG_LEVEL = logging.DEBUG
 CONSOLE_LOG_LEVEL = logging.INFO
-TOKEN_CACHE = '/home/ketchup/vscode/gdrive_client/tokens.json'
-APP_CREDS = '/home/ketchup/vscode/gdrive_client/credentials.json'
+TOKEN_CACHE = '~/.gdrive_sync/tokens.json'
+APP_CREDS = '~/.gdrive_sync/credentials.json'
 LPORT = 34888
-FOLDERS_CACHE_PATH = '/home/ketchup/vscode/gdrive_client/folders/'
+FOLDERS_CACHE_PATH = '~/.gdrive_sync/folders/'
 DRIVE_CACHE_PATH = "~/gdrive/"
 PAGE_SIZE = 50
 FOLDER_FIELDS = 'files(*)'
@@ -34,7 +34,7 @@ MEDIA_EXPORT_MATRIX = {
                     "extension": ".xslx"
             }
 }
-DATABASE_PATH = '/home/ketchup/vscode/gdrive_client/.metadata/md.db'
+DATABASE_PATH = '~/.gdrive_sync/md.db'
 UPLOAD_RETRIES_MAX = 3
 POLLING_INTERVAL = 5 #seconds
 

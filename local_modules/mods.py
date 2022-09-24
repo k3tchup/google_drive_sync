@@ -2,6 +2,7 @@
 
 # local modules for gsync client
 
+import errno
 import hashlib
 import logging
 import os
@@ -16,6 +17,17 @@ from gDrive_data_structures.data_types import *
 from datastore.sqlite_store import *
 from gDrive_modules.gDrive import *
 from config import config as cfg
+
+# fix up directories from config and make sure the paths exist
+def fixup_directory(path:str)-> str:
+    try:
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            os.makedirs(path)
+        return path
+    except Exception as err:
+        logging.error("Error processing config directory %s. %s" % (path, str(err)))
+
 
 # gets the md5 hash of a file
 def hash_file(filePath: str):

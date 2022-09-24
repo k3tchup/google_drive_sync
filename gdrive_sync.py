@@ -198,7 +198,13 @@ def main():
         raise Exception("unable to initialize logging")
 
     # fix up paths in the config
-    cfg.DRIVE_CACHE_PATH = os.path.expanduser(cfg.DRIVE_CACHE_PATH)
+    cfg.DRIVE_CACHE_PATH = fixup_directory(cfg.DRIVE_CACHE_PATH)
+    cfg.DRIVE_CACHE_PATH = fixup_directory(cfg.DRIVE_CACHE_PATH)
+    cfg.APP_CREDS = fixup_directory(cfg.APP_CREDS)
+    cfg.TOKEN_CACHE = fixup_directory(cfg.TOKEN_CACHE)
+    cfg.FOLDERS_CACHE_PATH = fixup_directory(cfg.FOLDERS_CACHE_PATH)
+    cfg.DATABASE_PATH = fixup_directory(cfg.DATABASE_PATH)
+
 
     """
     ********************************************************************
@@ -210,7 +216,7 @@ def main():
     #global DATABASE
     cfg.DATABASE = sqlite_store()
     if not os.path.exists(cfg.DATABASE_PATH):
-        cfg.DATABASE.create_db(dbPath='/home/ketchup/vscode/gdrive_client/.metadata/md.db')
+        cfg.DATABASE.create_db(dbPath=cfg.DATABASE_PATH)
 
 
     # max threads
@@ -251,23 +257,26 @@ def main():
 
     #update_db_folder_paths()
     #update_drive_files(service)
-
     #logging.info("clearing the local folder cache")
     #clearFolderCache(FOLDERS_CACHE_PATH)
-
     # fetch all the folders and structure from google drive
     #writeFolderCache(service) # only needed on first run to create the local folder tree
+
+    # if this is the first run, skip the merge routine (local path is empty)
+    if len(os.listdir(cfg.DRIVE_CACHE_PATH)) == 0:
+        logging.info("Local cache folder is empty.  Skipping merge routines and downloading everything.")
+        write_folder_cache(service)
+        do_full_download(service, cfg.ROOT_FOLDER_OBJECT, cfg.DRIVE_CACHE_PATH)
+
 
     # **************************************************************
     #  testing ground
     # **************************************************************
     #newFolder = create_drive_folder(service, "test5")
     #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')  
-    observer = Watcher(service)
-    observer.run()
-   
-
-    # **************************************************************
+    #observer = Watcher(service)
+    #observer.run()
+       # **************************************************************
     #  end testing ground
     # **************************************************************
 
