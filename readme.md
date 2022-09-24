@@ -73,6 +73,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] settings managed in a config file
 
+[x] store the tokens in a keyring service (use a python module for this)
+
 [ ] progress estimates for large downloads and uploads (both large by size and by number of files)
 
 [ ] write export function to export google apps content.  need to adjust the mime type for the correct content.  examples below
@@ -88,8 +90,6 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 [ ] multi-thread the merge functions
 
 [ ] implement a queueing service for dealing with the merges
-
-[ ] store the tokens in a keyring service (use a python module for this)
 
 [ ] multi-thread for uploads
 
