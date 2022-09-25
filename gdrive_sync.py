@@ -255,12 +255,8 @@ def main():
     cfg.DATABASE.insert_gObject(folder=rootFolder) # won't insert a dupe
 
 
-    #update_db_folder_paths()
-    #update_drive_files(service)
-    #logging.info("clearing the local folder cache")
-    #clearFolderCache(FOLDERS_CACHE_PATH)
-    # fetch all the folders and structure from google drive
-    #writeFolderCache(service) # only needed on first run to create the local folder tree
+    # initialize queueing
+    cfg.LOCAL_QUEUE = queue.Queue(maxsize=0)
 
     # if this is the first run, skip the merge routine (local path is empty)
     if len(os.listdir(cfg.DRIVE_CACHE_PATH)) == 0:
@@ -276,8 +272,8 @@ def main():
     # **************************************************************
     #newFolder = create_drive_folder(service, "test5")
     #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')  
-    #observer = Watcher(service)
-    #observer.run()
+    observer = Watcher(service)
+    observer.run()
        # **************************************************************
     #  end testing ground
     # **************************************************************

@@ -505,7 +505,7 @@ def upload_drive_file_simple(service, filePath:str, parentId:str=None)->gFile:
         fileDir = os.path.dirname(filePath)
         fileName = os.path.basename(filePath)
         logging.info("performing simple upload of file '%s'" % filePath)
-        file_metadata = {'name': fileName, 'parents': (parentId, )}
+        file_metadata = {'name': fileName, 'parents': parentId}
         media = MediaFileUpload(filePath, resumable=True)
         file = service.files().create(body=file_metadata, media_body=media,
                                       fields='*').execute()

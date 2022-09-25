@@ -56,3 +56,5 @@ DATABASE = None
 CHANGES_TOKEN = None
 TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
 TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
+LOCAL_QUEUE = None
+REMOTE_QUEUE = None
