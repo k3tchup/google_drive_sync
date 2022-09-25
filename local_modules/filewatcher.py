@@ -71,6 +71,8 @@ class Watcher:
                                 self.handle_file_create(task.change_object)
                             elif task.change_type == 'closed':
                                 self.handle_file_change(task.change_object)
+                            elif task.change_type == 'deleted':
+                                self.handle_file_delete(task.change_object)
                 except Exception as err:
                     logging.error("Error handling queue task. %s" % str(err))
                 finally:
@@ -118,13 +120,25 @@ class Watcher:
                 if dbFile is not None:
                     if dbFile.md5 != md5:
                         dbFile.md5 = md5
-                        # where do i get the service object from?  how do you pass args in this case?
                         update_drive_file(self.service, dbFile, filePath)
             else:
                 # treat it as create a file
                 self.handle_file_create(filePath)
         except Exception as err:
             logging.error("error handling local file change. %s" % str(err))
+
+    def handle_file_delete(self, filePath:str):
+        try:
+            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
+            if len(dbFiles) > 0:
+                dbFile = dbFiles[0]
+                # upload the file to Drive if needed
+                if dbFile is not None:
+                    delete_drive_file(self.service, dbFile)
+            else:
+                logging.error("Deleted file '%s' wasn't found in metadata database." % filePath)
+        except Exception as err:
+            logging.error("error deleting local file. %s" % str(err))    
 
 class Handler(FileSystemEventHandler):
 
@@ -151,7 +165,8 @@ class Handler(FileSystemEventHandler):
             # do something
 
         elif event.event_type == 'deleted':
-            i = 1
-            # do something
+            logging.info("detected deleted local file '%s'" % event.src_path)
+            change = Change(event.event_type, event.src_path, 'file')
+            cfg.LOCAL_QUEUE.put(change)
         else:
             logging.debug("unknown file watcher event. %s" % str(event.event_type))

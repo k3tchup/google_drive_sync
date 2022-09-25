@@ -598,14 +598,14 @@ def update_drive_files(service):
         logging.error("error updating cloudfile '%s'. %s" % (f.name, str(err)))
 
 def delete_drive_file(service, file:gFile):
-    file = None
+    #file = None
     try:
         file.properties['trashed'] = True
         gSerivceFiles = service.files()
-        params = { 'fileId': file.id, 'trashed': True}
-        f = gSerivceFiles.update(**params).execute()
-        file = gFile(f)
-        cfg.DATABASE.update_gObject(file=file)
+        gSerivceFiles.delete(fileId = file.id).execute()
+        logging.info("deleted Google Drive file with id %s" % file.id)
+        #cfg.DATABASE.update_gObject(file=file)
+        cfg.DATABASE.delete_gObject(id=file.id)
 
     except HttpError as err:
         logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))

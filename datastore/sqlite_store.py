@@ -451,6 +451,19 @@ class sqlite_store:
         else:
             self.__update_gFile(file)
 
+    def delete_gObject(self, id:str):
+        try:
+            deleteObject_sql = "DELETE FROM gObjects WHERE id = ?;"
+            sqlParams = (id,)
+    
+            self.cursor.execute(deleteObject_sql, sqlParams)
+            self.conn.commit()
+
+        except sqlite3.Error as e:
+            logging.error("Unable to delete object id %s. %s" % (id, str(e)))
+        except Exception as e:
+            logging.error("Unable to delete object id %s. %s" % (id, str(e)))
+
 
     def __update_gFolder(self, folder: gFolder):
         try:
