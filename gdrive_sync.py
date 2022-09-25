@@ -199,7 +199,6 @@ def main():
 
     # fix up paths in the config
     cfg.DRIVE_CACHE_PATH = fixup_directory(cfg.DRIVE_CACHE_PATH)
-    cfg.DRIVE_CACHE_PATH = fixup_directory(cfg.DRIVE_CACHE_PATH)
     cfg.APP_CREDS = fixup_directory(cfg.APP_CREDS)
     cfg.TOKEN_CACHE = fixup_directory(cfg.TOKEN_CACHE)
     cfg.FOLDERS_CACHE_PATH = fixup_directory(cfg.FOLDERS_CACHE_PATH)

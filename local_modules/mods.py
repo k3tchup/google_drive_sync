@@ -22,8 +22,10 @@ from config import config as cfg
 def fixup_directory(path:str)-> str:
     try:
         path = os.path.expanduser(path)
-        if not os.path.exists(path):
-            os.makedirs(path)
+        dir = os.path.dirname(path)
+        file = os.path.basename(path)
+        if not os.path.exists(dir):
+            os.makedirs(dir)
         return path
     except Exception as err:
         logging.error("Error processing config directory %s. %s" % (path, str(err)))

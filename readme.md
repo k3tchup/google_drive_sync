@@ -77,6 +77,10 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] store the tokens in a keyring service (use a python module for this)
 
+[x] delete files remotely
+
+[x] store the token.json contents in a key vault
+
 [ ] progress estimates for large downloads and uploads (both large by size and by number of files)
 
 [ ] write export function to export google apps content.  need to adjust the mime type for the correct content.  examples below
@@ -99,9 +103,11 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [ ] resumable uploads (in case the connection fails)
 
-[ ] delete files remotely
-
 [ ] handle file and directory moves
+
+- this is done for local moves of files
+- still need to handle directories locally
+- still need to handle moves in the cloud as well
 
 [ ] add local file watcher to detect changes to the cache folder immediately
 
@@ -110,8 +116,6 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 [ ] there are instances when folders with the same name just inherit the same id when a few folder is crated with the same name.  need to debug this.
 
 [ ] figure out why there are duplicate files with the same name and hash.  something to do with change sets.
-
-[ ] store the token.json contents in a key vault
 
 [ ] move the local database cache and other variable data into the user's home directory
 

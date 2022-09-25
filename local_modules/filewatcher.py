@@ -20,14 +20,15 @@ from config import config as cfg
 
 # data structure for queueing changes
 class Change:
-    def __init__(self, change: str = "", object=None, type=""):
+    def __init__(self, change: str = "", src_object=None, dst_object=None, type=""):
         if change not in ['modified', 'created', 'deleted', 'moved', 'closed']:
             raise "Invalid change type '%s'" % change
         if type not in ['file', 'directory']:
             raise "Invalid change type '%s'" % type
         self.change_type = change
         self.object_type=type
-        self.change_object = object
+        self.change_object = src_object
+        self.dst_object = dst_object
 
 
 class Watcher:
@@ -59,7 +60,14 @@ class Watcher:
 
         # needs it's onw service object for multithreading
         try:
-            credentials = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
+            if cfg.USE_KEYRING == True:
+                kr = Keyring()
+                tokenStr = kr.get_data("gdrive", "token")
+                if tokenStr is not None and tokenStr != "":
+                    tokenStr = json.loads(tokenStr)
+                credentials = Credentials.from_authorized_user_info(tokenStr, cfg.TARGET_SCOPES)
+            else:
+                credentials = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
             authorized_http = google_auth_httplib2.AuthorizedHttp(credentials, http=httplib2.Http())
             service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
             while True:
@@ -73,6 +81,8 @@ class Watcher:
                                 self.handle_file_change(task.change_object)
                             elif task.change_type == 'deleted':
                                 self.handle_file_delete(task.change_object)
+                            elif task.change_type == 'moved':
+                                self.handle_file_move(task.change_object, task.dst_object)
                 except Exception as err:
                     logging.error("Error handling queue task. %s" % str(err))
                 finally:
@@ -140,6 +150,34 @@ class Watcher:
         except Exception as err:
             logging.error("error deleting local file. %s" % str(err))    
 
+    def handle_file_move(self, srcPath:str, dstPath:str):
+        try:
+            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
+            if len(dbFiles) > 0:
+                dbFile = dbFiles[0]
+                if dbFile is not None:
+                    # get new parent
+                    parentFolder = os.path.dirname(dstPath)
+                    db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                                                    searchCriteria=parentFolder)
+                    db_parentFolder = db_parentFolders[0]
+                    parent_id = None
+                    if db_parentFolder is not None:
+                        parent_id = db_parentFolder.id
+                    else:
+                        parent = create_drive_folder_tree(self.service, parentFolder)
+                        parent_id = parent.id
+                    move_drive_file(self.service, dbFile, parent_id)
+                    dbFile.properties['parents'] = [parent_id]
+                    dbFile.localPath = dstPath
+                    cfg.DATABASE.update_gObject(file=dbFile)
+
+            else:
+                logging.error("Moved file '%s' wasn't found in metadata database." % srcPath)
+
+        except Exception as err:
+            logging.error("error moving file '%s'. %s" % (srcPath, str(err)))
+
 class Handler(FileSystemEventHandler):
 
     def __init__(self, service=None):
@@ -157,16 +195,18 @@ class Handler(FileSystemEventHandler):
         elif event.event_type == 'closed':
             # we'll handle file updates when the file is closed, otherwise, we are pushing incomplete changes for larger files.
             logging.info("detected changed local file '%s'" % event.src_path)
-            change = Change(event.event_type, event.src_path, 'file')
+            change = Change(event.event_type, event.src_path, None, 'file')
             cfg.LOCAL_QUEUE.put(change)
 
         elif event.event_type == 'moved':
-            i = 1
+            logging.info("detected locally moved file '%s'" % event.src_path)
+            change=Change(event.event_type, event.src_path, event.dest_path, 'file')
+            cfg.LOCAL_QUEUE.put(change)
             # do something
 
         elif event.event_type == 'deleted':
             logging.info("detected deleted local file '%s'" % event.src_path)
-            change = Change(event.event_type, event.src_path, 'file')
+            change = Change(event.event_type, event.src_path, None, 'file')
             cfg.LOCAL_QUEUE.put(change)
         else:
             logging.debug("unknown file watcher event. %s" % str(event.event_type))

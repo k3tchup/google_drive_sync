@@ -597,6 +597,20 @@ def update_drive_files(service):
     except Exception as err:
         logging.error("error updating cloudfile '%s'. %s" % (f.name, str(err)))
 
+def move_drive_file(service, file:gFile, newParent_id: str) -> gFile:
+    try:
+        prev_parents = ','.join(file.properties['parents'])
+        file = service.files().update(fileId=file.id, addParents=newParent_id,
+                                      removeParents=prev_parents,
+                                      fields='id, parents').execute()
+        file = get_drive_object(service, file['id'])
+        logging.info("moved file ID '%s' to new parent ID '%s'" % (file.id, newParent_id))
+    except HttpError as err:
+        logging.error("error moving file '%s' in Google Drive. %s" % (file.name, str(err)))
+    except Exception as err:
+        logging.error("error moving file '%s' in Google Drive. %s" % (file.name, str(err)))
+    return file   
+
 def delete_drive_file(service, file:gFile):
     #file = None
     try:
