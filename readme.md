@@ -25,6 +25,8 @@ https://www.googleapis.com/auth/activity
 * Upload local files to Google drive
   * track changed local files by hash and upload them to Drive
 * Sqlite database for metadata data storage 
+* Storing access and refresh tokens in OS keyring
+* Handles changes and tasks via queueing and multi-threading
 * Handle incremental changes by subscribing to Google Drive change tokens
 * Fetches files not owned by the Drive owner into a separate local folder
 
@@ -98,6 +100,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 [ ] resumable uploads (in case the connection fails)
 
 [ ] delete files remotely
+
+[ ] handle file and directory moves
 
 [ ] add local file watcher to detect changes to the cache folder immediately
 
