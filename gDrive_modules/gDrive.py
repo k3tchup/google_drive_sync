@@ -597,14 +597,21 @@ def update_drive_files(service):
     except Exception as err:
         logging.error("error updating cloudfile '%s'. %s" % (f.name, str(err)))
 
-def move_drive_file(service, file:gFile, newParent_id: str) -> gFile:
+def move_drive_file(service, file:gFile, newParent_id: str=None, newName:str = None) -> gFile:
     try:
-        prev_parents = ','.join(file.properties['parents'])
-        file = service.files().update(fileId=file.id, addParents=newParent_id,
-                                      removeParents=prev_parents,
-                                      fields='id, parents').execute()
-        file = get_drive_object(service, file['id'])
-        logging.info("moved file ID '%s' to new parent ID '%s'" % (file.id, newParent_id))
+        if file.properties['parents'][0] != newParent_id and newParent_id is not None:
+            prev_parents = ','.join(file.properties['parents'])
+            file = service.files().update(fileId=file.id, addParents=newParent_id,
+                                        removeParents=prev_parents,
+                                        fields='id, parents').execute()
+            file = get_drive_object(service, file['id'])
+            logging.info("moved file ID '%s' to new parent ID '%s'" % (file.id, newParent_id))
+        else:
+            if file.name != newName:
+                file = service.files().update(fileId=file.id, body={'name': newName}).execute()
+                file = get_drive_object(service, file['id'])
+            else:
+                logging.warning("Unable to process file '%s' move.  Can't parse the change." % file.id)
     except HttpError as err:
         logging.error("error moving file '%s' in Google Drive. %s" % (file.name, str(err)))
     except Exception as err:
