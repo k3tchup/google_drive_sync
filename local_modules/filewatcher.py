@@ -1,5 +1,6 @@
 # adapted from: https://michaelcho.me/article/using-pythons-watchdog-to-monitor-changes-to-a-directory
 
+from concurrent.futures import thread
 import time
 import os
 import sys
@@ -36,8 +37,9 @@ class Watcher:
     def __init__(self, service):
         self.observer = Observer()
         self.service = service
+        self.thread_runner = threading.Thread(target=self._runner, daemon=True)
         self.threads = [threading.Thread(target=self._worker, daemon=True)
-                    for _ in range(cfg.MAX_THREADS)]
+                    for _ in range(cfg.MAX_THREADS // 2)]
 
     def run(self):
         event_handler = Handler(self.service)
@@ -45,6 +47,12 @@ class Watcher:
         self.start_queue_processor()
         self.observer.start()
         
+        self.thread_runner.start()
+        #self.observer.join()
+        #for t in self.threads:
+        #    t.join()
+
+    def _runner(self):
         try:
             while True:
                 time.sleep(cfg.POLLING_INTERVAL)
@@ -52,9 +60,12 @@ class Watcher:
             self.observer.stop()
             logging.error("local file watcher stopped. %s" % str(err))
 
-        self.observer.join()
+
+    def stop(self):
+        self.observer.stop()
         for t in self.threads:
             t.join()
+        self.thread_runner.join()
 
     def _worker(self, lock=threading.Lock()):
 

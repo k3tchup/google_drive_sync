@@ -221,7 +221,7 @@ def main():
     # max threads
     #global MAX_THREADS
     cfg.MAX_THREADS = os.cpu_count() - 1
-    logging.info("initializing %d threads", cfg.MAX_THREADS)
+    logging.info("setting up %d threads", cfg.MAX_THREADS)
     
     """
     ********************************************************************
@@ -256,6 +256,7 @@ def main():
 
     # initialize queueing
     cfg.LOCAL_QUEUE = queue.Queue(maxsize=0)
+    cfg.REMOTE_QUEUE = queue.Queue(maxsize=0)
 
     # if this is the first run, skip the merge routine (local path is empty)
     if len(os.listdir(cfg.DRIVE_CACHE_PATH)) == 0:
@@ -271,8 +272,6 @@ def main():
     # **************************************************************
     #newFolder = create_drive_folder(service, "test5")
     #file = upload_file(service, '/home/ketchup/Downloads/user_agent_switcher-1.2.7.xpi', '1yTjqGApz4ClFazHwleeMf7pf3PXpozXK')  
-    observer = Watcher(service)
-    observer.run()
        # **************************************************************
     #  end testing ground
     # **************************************************************
@@ -343,6 +342,9 @@ def main():
     
     # need start this in a separate worker thread i think.   
     #print("initial sync complete watching for Google drive changes")
+    observer = Watcher(service)
+    observer.run()
+
     logging.info("initial sync complete. watching for Google drive changes.")
     try:
         while True:
@@ -402,6 +404,7 @@ def main():
         # need to stop Observer first
         pass
 
+    observer.stop()
 
     #downloadFilesFromFolder(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
     

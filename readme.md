@@ -83,6 +83,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] multi-thread for uploads
 
+[ ] change all silly while loops to queues and multi-thread that stuff
+
 [ ] progress estimates for large downloads and uploads (both large by size and by number of files)
 
 [ ] write export function to export google apps content.  need to adjust the mime type for the correct content.  examples below
