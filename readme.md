@@ -23,7 +23,7 @@ https://www.googleapis.com/auth/activity
   * hash verify the files
   * continuous monitoring for Drive for any changes and updating of local versions accordingly
 * Upload local files to Google drive
-  * track changed local files by hash and upload them to Drive
+  * track changed local files by hash and upload them to Drive. Also handles updates, moves, and deletes
 * Sqlite database for metadata data storage 
 * Storing access and refresh tokens in OS keyring
 * Handles changes and tasks via queueing and multi-threading
@@ -81,6 +81,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] store the token.json contents in a key vault
 
+[x] multi-thread for uploads
+
 [ ] progress estimates for large downloads and uploads (both large by size and by number of files)
 
 [ ] write export function to export google apps content.  need to adjust the mime type for the correct content.  examples below
@@ -96,8 +98,6 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 [ ] multi-thread the merge functions
 
 [ ] implement a queueing service for dealing with the merges
-
-[ ] multi-thread for uploads
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
 

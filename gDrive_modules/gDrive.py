@@ -418,7 +418,7 @@ def create_drive_folder(service, folderName:str, localPath:str, parentId:str=Non
         file_metadata = {
             'name': folderName,
             'mimeType': 'application/vnd.google-apps.folder',
-            'parents': (parentId,)
+            'parents': parentId
         }
 
         logging.info("creating folder %s in Google Drive" % folderName)

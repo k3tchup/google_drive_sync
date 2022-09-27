@@ -83,6 +83,14 @@ class Watcher:
                                 self.handle_file_delete(task.change_object)
                             elif task.change_type == 'moved':
                                 self.handle_file_move(task.change_object, task.dst_object)
+                        else:
+                            if task.change_type == 'moved':
+                                self.handle_file_move(task.change_object, task.dst_object)
+                            elif task.change_type == 'created':
+                                self.handle_dir_create(task.change_object)
+                            elif task.change_type == 'deleted':
+                                self.handle_file_delete(task.change_object)
+                            
                 except Exception as err:
                     logging.error("Error handling queue task. %s" % str(err))
                 finally:
@@ -171,17 +179,23 @@ class Watcher:
                         else:
                             parent = create_drive_folder_tree(self.service, parentFolder)
                             parent_id = parent.id
-                        move_drive_file(self.service, dbFile, parent_id)
+                        move_drive_file(service=self.service, file=dbFile, newParent_id = parent_id, newName=None)
                         dbFile.properties['parents'] = [parent_id]
                         dbFile.localPath = dstPath
-                        cfg.DATABASE.update_gObject(file=dbFile)
+                        if type(dbFile) == gFile:
+                            cfg.DATABASE.update_gObject(file=dbFile)
+                        else:
+                            cfg.DATABASE.update_gObject(folder=dbFile)
                     else:
                         newFileName = os.path.basename(dstPath)
-                        move_drive_file(self.service, dbFile, None, newFileName)
+                        move_drive_file(service=self.service, file=dbFile, newParent_id=None, newName=newFileName)
                         dbFile.name = newFileName
                         dbFile.properties['name'] = newFileName
                         dbFile.localPath = dstPath
-                        cfg.DATABASE.update_gObject(file=dbFile)
+                        if type(dbFile) == gFile:
+                            cfg.DATABASE.update_gObject(file=dbFile)
+                        else:
+                            cfg.DATABASE.update_gObject(folder=dbFile)
 
             else:
                 logging.error("Moved file '%s' wasn't found in metadata database." % srcPath)
@@ -195,6 +209,24 @@ class Watcher:
         except Exception as err:
             logging.error("Error processing directory '%s' change. %s" % (srcPath, str(err)))
 
+    def handle_dir_create(self, srcPath: str):
+        try:
+            # get parent directory
+            parentFolder = os.path.dirname(srcPath)
+            db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                                            searchCriteria=parentFolder)
+            db_parentFolder = db_parentFolders[0]
+            parent_id = None
+            if db_parentFolder is not None:
+                parent_id = [db_parentFolder.id]
+            else:
+                parent = create_drive_folder_tree(self.service, parentFolder)
+                parent_id = parent.id
+            folder = create_drive_folder(self.service, os.path.basename(srcPath), srcPath, parent_id)
+        except Exception as err:
+            logging.error("Error creating directory '%s'. %s" % (srcPath, str(err)))
+    
+
 class Handler(FileSystemEventHandler):
 
     def __init__(self, service=None):
@@ -203,8 +235,7 @@ class Handler(FileSystemEventHandler):
 
     @staticmethod
     def on_any_event(event):
-        if event.is_directory:
-            
+        if event.is_directory:     
             if event.event_type == 'created':
                 logging.info("detected a new local directory '%s'" % event.src_path)
                 change = Change(event.event_type, event.src_path, None, 'directory')
