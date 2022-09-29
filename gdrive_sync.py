@@ -130,9 +130,9 @@ def reconcile_local_files_with_db():
 
     # delete any files marked as 'trashed' in the db from disk
     logging.info("deleting local files that have been marked as trashed.")
-    toCount = 0
+    processed = 0
     while True:
-        trashedObjects, toCount = cfg.DATABASE.fetch_deletedObjects(offset=toCount)
+        trashedObjects, c = cfg.DATABASE.fetch_deletedObjects(offset=processed)
         for file in trashedObjects:
             if file.mimeType != cfg.TYPE_GOOGLE_FOLDER and cfg.TYPE_GOOGLE_APPS not in file.mimeType:
                 try:
@@ -155,10 +155,49 @@ def reconcile_local_files_with_db():
                             logging.warning("folder %s isn't empty, skipping." % file.localPath)
                 except Exception as err:
                     logging.error("error removing trashed folder %s. %s" % (file.localPath, str(err)))
-        if toCount == 0:
+        processed += c
+        if c == 0:
             break
     
     return
+
+def _runner():
+    try:
+        while True:
+            time.sleep(cfg.POLLING_INTERVAL)
+    except Exception as err:
+        logging.error("Google Drive watcher stopped. %s" % str(err))
+
+def _worker(lock=threading.Lock()):
+
+    # needs it's onw service object for multithreading
+    try:
+        if cfg.USE_KEYRING == True:
+            kr = Keyring()
+            tokenStr = kr.get_data("gdrive", "token")
+            if tokenStr is not None and tokenStr != "":
+                tokenStr = json.loads(tokenStr)
+            credentials = Credentials.from_authorized_user_info(tokenStr, cfg.TARGET_SCOPES)
+        else:
+            credentials = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
+        authorized_http = google_auth_httplib2.AuthorizedHttp(credentials, http=httplib2.Http())
+        service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
+        while True:
+            try:
+                with lock:
+                    change = cfg.REMOTE_QUEUE.get()
+                    if change.mimeType == cfg.TYPE_GOOGLE_FOLDER:
+                        handle_changed_folder(service, change)
+                    elif change.mimeType == cfg.TYPE_GOOGLE_APPS:
+                        pass
+                    else:
+                        handle_changed_file(service, change)        
+            except Exception as err:
+                logging.error("Error handling queue task. %s" % str(err))
+            finally:
+                cfg.REMOTE_QUEUE.task_done()
+    except Exception as err:
+        logging.error("Error initializing remote queue worker. %s" % str(err))
 
 
 def main():
@@ -221,7 +260,7 @@ def main():
     # max threads
     #global MAX_THREADS
     cfg.MAX_THREADS = os.cpu_count() - 1
-    logging.info("setting up %d threads", cfg.MAX_THREADS)
+    logging.info("Set up parallelism to %d threads", cfg.MAX_THREADS)
     
     """
     ********************************************************************
@@ -336,16 +375,22 @@ def main():
 
     # start tracking changes
     #global CHANGES_TOKEN
+    logging.info("initial sync complete. watching for Google drive changes.")
     logging.debug("fetching change token from google drive")
     cfg.CHANGES_TOKEN = get_drive_changes_token(service)
 
-    
-    # need start this in a separate worker thread i think.   
-    #print("initial sync complete watching for Google drive changes")
+    # start local watcher for any changes to files locally
     observer = Watcher(service)
     observer.run()
 
-    logging.info("initial sync complete. watching for Google drive changes.")
+    # start remote watchers for any changs in Google Drive
+    thread_runner = threading.Thread(target=_runner, daemon=True)
+    threads = [threading.Thread(target=_worker, daemon=True)
+                for _ in range(cfg.MAX_THREADS // 2)]
+    for t in threads:
+        t.start()
+    thread_runner.start()
+    
     try:
         while True:
             try:
@@ -353,11 +398,14 @@ def main():
                 logging.debug("retrieved %d changes from google drive" % len(changes))
                 
                 # grab full metadata for all the files first so that we can make informed decisions on the fly
-                enrichedChanges = []
+                #enrichedChanges = []
                 for change in changes:
                     gObject = get_drive_object(service, change['fileId'])
-                    enrichedChanges.append(gObject)
+                    #enrichedChanges.append(gObject)
+                    cfg.REMOTE_QUEUE.put(gObject)
 
+               
+                '''
                 # handle removes first
                 i = len(enrichedChanges) - 1
                 for i in reversed(range(len(enrichedChanges))):
@@ -396,7 +444,7 @@ def main():
                     else:
                         # handle removes later
                         return
-                
+                '''
             except Exception as err:
                 logging.error("error parsing change set. %s" % str(err))
             sleep(cfg.POLLING_INTERVAL)
@@ -406,10 +454,9 @@ def main():
 
     observer.stop()
 
-    #downloadFilesFromFolder(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
-    
-    # do full download.  only needed on first run
-    #doFullDownload(service, ROOT_FOLDER_OBJECT, '/home/ketchup/gdrive')
+    for t in threads:
+        t.join()
+    thread_runner.join()
 
     service.close()
     cfg.DATABASE.close()

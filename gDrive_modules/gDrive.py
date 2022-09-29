@@ -835,12 +835,8 @@ def handle_changed_folder(service, folder: gFolder = None):
                                     folder.name)
                                 full_path = os.path.expanduser(full_path)
                                 if os.path.exists(full_path):
-                                    #if len(os.listdir(full_path)) == 0:
                                     logging.info("removing trashed directory '%s'" % full_path)
-                                    #os.rmdir(full_path)
                                     shutil.rmtree(full_path)
-                                    #else:
-                                    #    logging.warning("unable to remove trashed dir '%s'. not empty" % full_path) 
                             
     except Exception as err:
         logging.error("error processing Google object change. %s" % str(err))

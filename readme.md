@@ -83,6 +83,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] multi-thread for uploads
 
+[ ] for uploading changes, need to compare modified times before changing the remote files
+
 [ ] change all silly while loops to queues and multi-thread that stuff
 
 [ ] progress estimates for large downloads and uploads (both large by size and by number of files)
