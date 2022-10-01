@@ -102,20 +102,20 @@ class Watcher:
                             task = cfg.LOCAL_QUEUE.get()
                             if task.object_type == 'file':
                                 if task.change_type == 'created':
-                                    self.handle_file_create(task.change_object)
+                                    self.handle_file_create(service, task.change_object)
                                 elif task.change_type == 'closed':
-                                    self.handle_file_change(task.change_object)
+                                    self.handle_file_change(service, task.change_object)
                                 elif task.change_type == 'deleted':
-                                    self.handle_file_delete(task.change_object)
+                                    self.handle_file_delete(service, task.change_object)
                                 elif task.change_type == 'moved':
-                                    self.handle_file_move(task.change_object, task.dst_object)
+                                    self.handle_file_move(service, task.change_object, task.dst_object)
                             else:
                                 if task.change_type == 'moved':
-                                    self.handle_file_move(task.change_object, task.dst_object)
+                                    self.handle_file_move(service, task.change_object, task.dst_object)
                                 elif task.change_type == 'created':
-                                    self.handle_dir_create(task.change_object)
+                                    self.handle_dir_create(service, task.change_object)
                                 elif task.change_type == 'deleted':
-                                    self.handle_file_delete(task.change_object)
+                                    self.handle_file_delete(service, task.change_object)
                             
                 except Exception as err:
                     logging.error("Error handling queue task. %s" % str(err))
@@ -133,17 +133,10 @@ class Watcher:
         if (self.observer.is_alive() == True):
             self.observer.stop
 
-    def handle_file_create(self, filePath:str):
+    def handle_file_create(self, service, filePath:str):
         try:
             # hash the file
-            md5 = hash_file(filePath)
-            # see if the file exists in the database already (just created)
-            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
-            if len(dbFiles) > 0:
-                dbFile = dbFiles[0]
-                if dbFile.id in cfg.IGNORE_IDS:
-                    logging.debug("File %s created by the sync process, ignoring." % dbFile.id)
-                    return
+            #md5 = hash_file(filePath)
             # get parent directory
             parentFolder = os.path.dirname(filePath)
             db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
@@ -153,13 +146,14 @@ class Watcher:
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]
             else:
-                parent = create_drive_folder_tree(self.service, parentFolder)
+                parent = create_drive_folder_tree(service, parentFolder)
                 parent_id = parent.id
-            file = upload_drive_file(self.service, filePath, parent_id)
+            file = upload_drive_file(service, filePath, parent_id)
+            cfg.RQUEUE_IGNORE.append(file.id)
         except Exception as err:
             logging.error("error handling local file change. %s" % str(err))
 
-    def handle_file_change(self, filePath:str):
+    def handle_file_change(self, service, filePath:str):
         try:
             # hash the file
             md5 = hash_file(filePath)
@@ -167,42 +161,38 @@ class Watcher:
             dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
-                if dbFile.id in cfg.IGNORE_IDS:
-                    return
                 # upload the file to Drive if needed
                 if dbFile is not None:
                     if dbFile.md5 != md5:
                         dbFile.md5 = md5
-                        update_drive_file(self.service, dbFile, filePath)
+                        file = update_drive_file(service, dbFile, filePath)
+                        cfg.RQUEUE_IGNORE.append(file.id)
             else:
                 # treat it as create a file
-                self.handle_file_create(filePath)
+                self.handle_file_create(service, filePath)
         except Exception as err:
             logging.error("error handling local file change. %s" % str(err))
 
-    def handle_file_delete(self, filePath:str):
+    def handle_file_delete(self, service, filePath:str):
         try:
             dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
-                if dbFile.id in cfg.IGNORE_IDS:
-                    return
                 # upload the file to Drive if needed
                 if dbFile is not None:
-                    delete_drive_file(self.service, dbFile)
+                    delete_drive_file(service, dbFile)
+                    cfg.RQUEUE_IGNORE.append(dbFile.id)
             else:
                 logging.error("Deleted file '%s' wasn't found in metadata database." % filePath)
         except Exception as err:
             logging.error("error deleting local file. %s" % str(err))    
 
-    def handle_file_move(self, srcPath:str, dstPath:str):
+    def handle_file_move(self, service, srcPath:str, dstPath:str):
         try:
             dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
                 if dbFile is not None:
-                    if dbFile.id in cfg.IGNORE_IDS:
-                        return
                     # get new parent
                     oldParentFolder = os.path.dirname(srcPath)
                     parentFolder = os.path.dirname(dstPath)
@@ -216,9 +206,10 @@ class Watcher:
                         if db_parentFolder is not None:
                             parent_id = db_parentFolder.id
                         else:
-                            parent = create_drive_folder_tree(self.service, parentFolder)
+                            parent = create_drive_folder_tree(service, parentFolder)
                             parent_id = parent.id
-                        move_drive_file(service=self.service, file=dbFile, newParent_id = parent_id, newName=None)
+                        move_drive_file(service=service, file=dbFile, newParent_id = parent_id, newName=None)
+                        cfg.RQUEUE_IGNORE.append(dbFile.id)
                         dbFile.properties['parents'] = [parent_id]
                         dbFile.localPath = dstPath
                         if type(dbFile) == gFile:
@@ -227,7 +218,8 @@ class Watcher:
                             cfg.DATABASE.update_gObject(folder=dbFile)
                     else:
                         newFileName = os.path.basename(dstPath)
-                        move_drive_file(service=self.service, file=dbFile, newParent_id=None, newName=newFileName)
+                        move_drive_file(service=service, file=dbFile, newParent_id=None, newName=newFileName)
+                        cfg.RQUEUE_IGNORE.append(dbFile.id)
                         dbFile.name = newFileName
                         dbFile.properties['name'] = newFileName
                         dbFile.localPath = dstPath
@@ -242,21 +234,14 @@ class Watcher:
         except Exception as err:
             logging.error("error moving file '%s'. %s" % (srcPath, str(err)))
     
-    def handle_dir_change(self, srcPath: str):
+    def handle_dir_change(self, service, srcPath: str):
         try:
             pass
         except Exception as err:
             logging.error("Error processing directory '%s' change. %s" % (srcPath, str(err)))
 
-    def handle_dir_create(self, srcPath: str):
+    def handle_dir_create(self, service, srcPath: str):
         try:
-            # see if the file exists in the database already (just created)
-            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
-            if len(dbFiles) > 0:
-                dbFile = dbFiles[0]
-                if dbFile.id in cfg.IGNORE_IDS:
-                    logging.debug("File %s created by the sync process, ignoring." % dbFile.id)
-                    return
             # get parent directory
             parentFolder = os.path.dirname(srcPath)
             db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
@@ -266,9 +251,9 @@ class Watcher:
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]
             else:
-                parent = create_drive_folder_tree(self.service, parentFolder)
+                parent = create_drive_folder_tree(service, parentFolder)
                 parent_id = parent.id
-            folder = create_drive_folder(self.service, os.path.basename(srcPath), srcPath, parent_id)
+            folder = create_drive_folder(service, os.path.basename(srcPath), srcPath, parent_id)
         except Exception as err:
             logging.error("Error creating directory '%s'. %s" % (srcPath, str(err)))
     

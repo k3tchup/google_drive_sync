@@ -407,7 +407,11 @@ def main():
                 for change in changes:
                     gObject = get_drive_object(service, change['fileId'])
                     #enrichedChanges.append(gObject)
-                    cfg.REMOTE_QUEUE.put(gObject)
+                    if gObject.id not in cfg.RQUEUE_IGNORE:
+                        cfg.REMOTE_QUEUE.put(gObject)
+                    else:
+                        cfg.RQUEUE_IGNORE.remove(gObject.id)
+
 
                
                 '''
