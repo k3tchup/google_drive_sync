@@ -6,6 +6,7 @@
 #import preprocessing
 
 import logging
+from typing import List
 
 
 # config variables that can be changed
@@ -58,3 +59,8 @@ TYPE_GOOGLE_APPS = 'application/vnd.google-apps'
 TYPE_GOOGLE_FOLDER = 'application/vnd.google-apps.folder'
 LOCAL_QUEUE = None
 REMOTE_QUEUE = None
+OBSERVER = None
+# ignore changes to these files (temporarily) while changes are being processed
+# this is to avoid processing inotify changes for files we just downloaded and uploaded
+LQUEUE_IGNORE = list()
+RQUEUE_IGNORE = list()

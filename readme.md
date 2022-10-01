@@ -83,6 +83,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] multi-thread for uploads
 
+[ ] pause local or remote queue handling while performing i/o operations, otherwise we end up consuming events for the actions we are performing.
+
 [ ] for uploading changes, need to compare modified times before changing the remote files
 
 [ ] change all silly while loops to queues and multi-thread that stuff

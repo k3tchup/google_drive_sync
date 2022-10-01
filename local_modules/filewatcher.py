@@ -1,6 +1,7 @@
 # adapted from: https://michaelcho.me/article/using-pythons-watchdog-to-monitor-changes-to-a-directory
 
 from concurrent.futures import thread
+from shelve import DbfilenameShelf
 import time
 import os
 import sys
@@ -18,6 +19,8 @@ from gDrive_modules.gDrive import *
 from datastore.sqlite_store import *
 from local_modules.mods import *
 from config import config as cfg
+
+paused = False
 
 # data structure for queueing changes
 class Change:
@@ -40,6 +43,7 @@ class Watcher:
         self.thread_runner = threading.Thread(target=self._runner, daemon=True)
         self.threads = [threading.Thread(target=self._worker, daemon=True)
                     for _ in range(cfg.MAX_THREADS // 2)]
+        self.paused = False
 
     def run(self):
         event_handler = Handler(self.service)
@@ -51,6 +55,16 @@ class Watcher:
         #self.observer.join()
         #for t in self.threads:
         #    t.join()
+
+    def pause(self):
+        self.paused = True
+        global paused
+        paused = True
+
+    def resume(self):
+        self.paused = False
+        global paused
+        paused = False
 
     def _runner(self):
         try:
@@ -69,7 +83,7 @@ class Watcher:
 
     def _worker(self, lock=threading.Lock()):
 
-        # needs it's onw service object for multithreading
+        # needs it's own service object for multithreading
         try:
             if cfg.USE_KEYRING == True:
                 kr = Keyring()
@@ -83,24 +97,25 @@ class Watcher:
             service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
             while True:
                 try:
-                    with lock:
-                        task = cfg.LOCAL_QUEUE.get()
-                        if task.object_type == 'file':
-                            if task.change_type == 'created':
-                                self.handle_file_create(task.change_object)
-                            elif task.change_type == 'closed':
-                                self.handle_file_change(task.change_object)
-                            elif task.change_type == 'deleted':
-                                self.handle_file_delete(task.change_object)
-                            elif task.change_type == 'moved':
-                                self.handle_file_move(task.change_object, task.dst_object)
-                        else:
-                            if task.change_type == 'moved':
-                                self.handle_file_move(task.change_object, task.dst_object)
-                            elif task.change_type == 'created':
-                                self.handle_dir_create(task.change_object)
-                            elif task.change_type == 'deleted':
-                                self.handle_file_delete(task.change_object)
+                    if not self.paused and cfg.REMOTE_QUEUE.empty():
+                        with lock:
+                            task = cfg.LOCAL_QUEUE.get()
+                            if task.object_type == 'file':
+                                if task.change_type == 'created':
+                                    self.handle_file_create(task.change_object)
+                                elif task.change_type == 'closed':
+                                    self.handle_file_change(task.change_object)
+                                elif task.change_type == 'deleted':
+                                    self.handle_file_delete(task.change_object)
+                                elif task.change_type == 'moved':
+                                    self.handle_file_move(task.change_object, task.dst_object)
+                            else:
+                                if task.change_type == 'moved':
+                                    self.handle_file_move(task.change_object, task.dst_object)
+                                elif task.change_type == 'created':
+                                    self.handle_dir_create(task.change_object)
+                                elif task.change_type == 'deleted':
+                                    self.handle_file_delete(task.change_object)
                             
                 except Exception as err:
                     logging.error("Error handling queue task. %s" % str(err))
@@ -122,6 +137,13 @@ class Watcher:
         try:
             # hash the file
             md5 = hash_file(filePath)
+            # see if the file exists in the database already (just created)
+            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
+            if len(dbFiles) > 0:
+                dbFile = dbFiles[0]
+                if dbFile.id in cfg.IGNORE_IDS:
+                    logging.debug("File %s created by the sync process, ignoring." % dbFile.id)
+                    return
             # get parent directory
             parentFolder = os.path.dirname(filePath)
             db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
@@ -145,6 +167,8 @@ class Watcher:
             dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
+                if dbFile.id in cfg.IGNORE_IDS:
+                    return
                 # upload the file to Drive if needed
                 if dbFile is not None:
                     if dbFile.md5 != md5:
@@ -161,6 +185,8 @@ class Watcher:
             dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
+                if dbFile.id in cfg.IGNORE_IDS:
+                    return
                 # upload the file to Drive if needed
                 if dbFile is not None:
                     delete_drive_file(self.service, dbFile)
@@ -175,6 +201,8 @@ class Watcher:
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
                 if dbFile is not None:
+                    if dbFile.id in cfg.IGNORE_IDS:
+                        return
                     # get new parent
                     oldParentFolder = os.path.dirname(srcPath)
                     parentFolder = os.path.dirname(dstPath)
@@ -222,6 +250,13 @@ class Watcher:
 
     def handle_dir_create(self, srcPath: str):
         try:
+            # see if the file exists in the database already (just created)
+            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
+            if len(dbFiles) > 0:
+                dbFile = dbFiles[0]
+                if dbFile.id in cfg.IGNORE_IDS:
+                    logging.debug("File %s created by the sync process, ignoring." % dbFile.id)
+                    return
             # get parent directory
             parentFolder = os.path.dirname(srcPath)
             db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
@@ -246,49 +281,55 @@ class Handler(FileSystemEventHandler):
 
     @staticmethod
     def on_any_event(event):
-        if event.is_directory:     
-            if event.event_type == 'created':
-                logging.info("detected a new local directory '%s'" % event.src_path)
-                change = Change(event.event_type, event.src_path, None, 'directory')
-                cfg.LOCAL_QUEUE.put(change)
-            elif event.event_type == 'modified':
-                logging.info("detected a modified local directory '%s'" % event.src_path)
-                #change = Change(event.event_type, event.src_path, None, 'directory')
-                #cfg.LOCAL_QUEUE.put(change)
-            elif event.event_type == 'deleted':
-                logging.info("detected a deleted local directory '%s'" % event.src_path)
-                change = Change(event.event_type, event.src_path, None, 'directory')
-                cfg.LOCAL_QUEUE.put(change)
-            elif event.event_type == 'moved':
-                logging.info("detected a moved local directory '%s'" % event.src_path)
-                Handler.lastDirectory = event.src_path # avoid dealing with child changes since they all get triggered as well
-                change = Change(event.event_type, event.src_path, event.dest_path, 'directory')
-                cfg.LOCAL_QUEUE.put(change)
-        else:
-            change_dir = os.path.dirname(event.src_path)
-            #if 'lastDirectory' in Handler.__dict__:
-            #    if Handler.lastDirectory == change_dir:
-            #        return
-            #    else:
-            #        Handler.lastDirectory = os.path.dirname(event.src_path)
-            if event.event_type == 'created':
-                logging.info("detected a new local file '%s'" % event.src_path)
-            
-            elif event.event_type == 'closed':
-                # we'll handle file updates when the file is closed, otherwise, we are pushing incomplete changes for larger files.
-                logging.info("detected changed local file '%s'" % event.src_path)
-                change = Change(event.event_type, event.src_path, None, 'file')
-                cfg.LOCAL_QUEUE.put(change)
-
-            elif event.event_type == 'moved':
-                logging.info("detected locally moved file '%s'" % event.src_path)
-                change=Change(event.event_type, event.src_path, event.dest_path, 'file')
-                cfg.LOCAL_QUEUE.put(change)
-                # do something
-
-            elif event.event_type == 'deleted':
-                logging.info("detected deleted local file '%s'" % event.src_path)
-                change = Change(event.event_type, event.src_path, None, 'file')
-                cfg.LOCAL_QUEUE.put(change)
+        if not paused:
+            if event.is_directory:     
+                if event.event_type == 'created':
+                    if not event.src_path in cfg.LQUEUE_IGNORE:
+                        logging.info("detected a new local directory '%s'" % event.src_path)
+                        change = Change(event.event_type, event.src_path, None, 'directory')
+                        cfg.LOCAL_QUEUE.put(change)
+                elif event.event_type == 'modified':
+                    logging.info("detected a modified local directory '%s'" % event.src_path)
+                    #change = Change(event.event_type, event.src_path, None, 'directory')
+                    #cfg.LOCAL_QUEUE.put(change)
+                elif event.event_type == 'deleted':
+                    if not event.src_path in cfg.LQUEUE_IGNORE:
+                        logging.info("detected a deleted local directory '%s'" % event.src_path)
+                        change = Change(event.event_type, event.src_path, None, 'directory')
+                        cfg.LOCAL_QUEUE.put(change)
+                elif event.event_type == 'moved':
+                    if not event.src_path in cfg.LQUEUE_IGNORE and event.dest_path not in cfg.LQUEUE_IGNORE:
+                        logging.info("detected a moved local directory '%s'" % event.src_path)
+                        Handler.lastDirectory = event.src_path # avoid dealing with child changes since they all get triggered as well
+                        change = Change(event.event_type, event.src_path, event.dest_path, 'directory')
+                        cfg.LOCAL_QUEUE.put(change)
             else:
-                logging.debug("unknown file watcher event. %s" % str(event.event_type))
+                change_dir = os.path.dirname(event.src_path)
+                #if 'lastDirectory' in Handler.__dict__:
+                #    if Handler.lastDirectory == change_dir:
+                #        return
+                #    else:
+                #        Handler.lastDirectory = os.path.dirname(event.src_path)
+                if event.event_type == 'created':
+                    logging.info("detected a new local file '%s'" % event.src_path)
+                
+                elif event.event_type == 'closed':
+                    # we'll handle file updates when the file is closed, otherwise, we are pushing incomplete changes for larger files.
+                    if event.src_path not in cfg.LQUEUE_IGNORE:
+                        logging.info("detected changed local file '%s'" % event.src_path)
+                        change = Change(event.event_type, event.src_path, None, 'file')
+                        cfg.LOCAL_QUEUE.put(change)
+
+                elif event.event_type == 'moved':
+                    if event.src_path not in cfg.LQUEUE_IGNORE and event.dest_path not in cfg.LQUEUE_IGNORE:
+                        logging.info("detected locally moved file '%s'" % event.src_path)
+                        change=Change(event.event_type, event.src_path, event.dest_path, 'file')
+                        cfg.LOCAL_QUEUE.put(change)
+                        
+                elif event.event_type == 'deleted':
+                    if event.src_path not in cfg.LQUEUE_IGNORE:
+                        logging.info("detected deleted local file '%s'" % event.src_path)
+                        change = Change(event.event_type, event.src_path, None, 'file')
+                        cfg.LOCAL_QUEUE.put(change)
+                else:
+                    logging.debug("unknown file watcher event. %s" % str(event.event_type))

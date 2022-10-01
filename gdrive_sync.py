@@ -1,6 +1,7 @@
 #!/usr/bin/env python3.8
 
 from __future__ import print_function
+from shelve import DbfilenameShelf
 from time import sleep
 from typing import List
 import json
@@ -58,7 +59,7 @@ def get_gdrive_changes(service) -> List:
                     
                 if f['mimeType'] == cfg.TYPE_GOOGLE_FOLDER:
                     googleFolder = gFolder(f)
-                    if dbFile is not None:
+                    if dbFile is not None and 'version' in dbFile.properties.keys():
                         # if (dbFile.id != googleFolder.id or \
                         #            dbFile.name != googleFolder.name) and \
                         #            dbFile.properties['version'] < googleFolder.properties['version']:
@@ -77,7 +78,7 @@ def get_gdrive_changes(service) -> List:
                     
                 else:
                     googleFile = gFile(f)
-                    if dbFile is not None:
+                    if dbFile is not None and 'version' in dbFile.properties.keys():
                         #if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
                         #    dbFile.mimeType != googleFile.mimeType) and \
                         #    dbFile.properties['version'] < googleFile.properties['version']:
@@ -196,6 +197,10 @@ def _worker(lock=threading.Lock()):
                 logging.error("Error handling queue task. %s" % str(err))
             finally:
                 cfg.REMOTE_QUEUE.task_done()
+                #while cfg.LOCAL_QUEUE.unfinished_tasks > 0:
+                #    # wait for any resulting local operations are dequeued 
+                #    sleep(1)
+                #cfg.LQUEUE_IGNORE.remove(change.id)
     except Exception as err:
         logging.error("Error initializing remote queue worker. %s" % str(err))
 
@@ -380,8 +385,8 @@ def main():
     cfg.CHANGES_TOKEN = get_drive_changes_token(service)
 
     # start local watcher for any changes to files locally
-    observer = Watcher(service)
-    observer.run()
+    cfg.OBSERVER = Watcher(service)
+    cfg.OBSERVER.run()
 
     # start remote watchers for any changs in Google Drive
     thread_runner = threading.Thread(target=_runner, daemon=True)
@@ -452,7 +457,7 @@ def main():
         # need to stop Observer first
         pass
 
-    observer.stop()
+    cfg.OBSERVER.stop()
 
     for t in threads:
         t.join()

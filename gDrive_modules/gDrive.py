@@ -5,6 +5,7 @@ import os
 import io
 import concurrent.futures
 import shutil
+from time import sleep
 import keyring
 
 # google and http imports
@@ -687,6 +688,7 @@ def handle_changed_file(service, file:gFile = None):
             #      create or update an existing file
             # ******************************************
             dbFiles = cfg.DATABASE.fetch_gObject(file.id)
+            # **** handle file creation ****
             if len(dbFiles) > 1:
                 logging.warn("file id %s has multiple entries in the database. skipping." % file.id)
             elif len(dbFiles) == 0:
@@ -700,9 +702,11 @@ def handle_changed_file(service, file:gFile = None):
                             get_full_folder_path(service, parent_folder), \
                             file.name)
                         full_path = os.path.expanduser(full_path)
+                        cfg.LQUEUE_IGNORE.append(full_path)
                         download_file(service, file, full_path)
+                        cfg.LQUEUE_IGNORE.remove(full_path)
             else:
-                # **** handle file updates
+                # **** handle file updates ****
                 dbFile  = dbFiles[0]
                 if file.properties != dbFile.properties and int(file.properties['version']) > int(dbFile.properties['version']):
                     # if the md5 is different for the file, then we are going to remove the local version and re-download
@@ -735,13 +739,20 @@ def handle_changed_file(service, file:gFile = None):
                                             if os.path.exists(full_path):
                                                 logging.info("removing outdated file '%s'." % full_path)
                                                 os.remove(full_path)
+                                            cfg.LQUEUE_IGNORE.append(full_path)
                                             download_file(service, file, full_path)
+                                            cfg.LQUEUE_IGNORE.remove(full_path)
                                         
 
                                         # do the rename
                                         if file.name != dbFile.name:
                                             if root_path_old == root_path:
+                                                cfg.LQUEUE_IGNORE.append(full_path_old)
+                                                cfg.LQUEUE_IGNORE.append(full_path)
                                                 os.rename(full_path_old, full_path)
+                                                sleep(0.2) # give the Watchdog service time to catch up
+                                                cfg.LQUEUE_IGNORE.remove(full_path_old)
+                                                cfg.LQUEUE_IGNORE.remove(full_path)
 
                         except Exception as err:
                             logging.error("unable to update file id %s. %s" % (file.id, str(err)))
@@ -760,7 +771,10 @@ def handle_changed_file(service, file:gFile = None):
                                     full_path = os.path.expanduser(full_path)
                                     if os.path.exists(full_path):
                                         logging.info("removing trashed file '%s'" % full_path)
+                                        cfg.LQUEUE_IGNORE.append(full_path)
                                         os.remove(full_path)
+                                        sleep(0.2) # give the Watchdog service time to catch up
+                                        cfg.LQUEUE_IGNORE.remove(full_path)
                                 except Exception as err:
                                     logging.error("unable to remove local file %s. %s" % (full_path, str(err)))
 
@@ -768,7 +782,7 @@ def handle_changed_file(service, file:gFile = None):
         logging.error("error processing Google object change. %s" % str(err))
     except HttpError as err:
         logging.error("error processing Google object change. %s" % str(err))
-    return
+    return 
 
 # handles any sort of folder change in google drive (create, update, delete)
 def handle_changed_folder(service, folder: gFolder = None):
