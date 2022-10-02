@@ -6,7 +6,7 @@ import io
 import concurrent.futures
 import shutil
 from time import sleep
-import keyring
+#import keyring
 
 # google and http imports
 from google.auth.transport.requests import Request
@@ -29,7 +29,23 @@ from gDrive_data_structures.data_types import *
 from datastore.sqlite_store import *
 from local_modules.mods import *
 from local_modules.keyring import *
+#from local_modules.filewatcher import Change
 from config import config as cfg
+
+# data structure for queueing changes
+class Change:
+    def __init__(self, change: str = "", src_object=None, dst_object=None, type=""):
+        if change not in ['modified', 'created', 'deleted', 'moved', 'closed']:
+            raise "Invalid change type '%s'" % change
+        if type not in ['file', 'directory']:
+            raise "Invalid change type '%s'" % type
+        self.change_type = change
+        self.object_type=type
+        self.change_object = src_object
+        self.dst_object = dst_object
+
+def test_func():
+    print("test function called")
 
 def login_to_drive():
     logging.info("initializing application credentials")
@@ -84,6 +100,7 @@ def login_to_drive():
                         else:
                             os.remove(cfg.TOKEN_CACHE)
                         login_to_drive()
+                        return
                     logging.error("error logging in to Google Drive. %s" % str(err))  
             else:
                 flow = InstalledAppFlow.from_client_secrets_file(cfg.APP_CREDS, cfg.TARGET_SCOPES)
@@ -538,7 +555,9 @@ def upload_new_local_files(service):
                         else:
                             parent = create_drive_folder_tree(service, parentFolder)
                             f.properties['parents'] = parent.id
-                        file = upload_drive_file(service, f.localPath, f.properties['parents'][0])
+                        #file = upload_drive_file(service, f.localPath, f.properties['parents'][0])
+                        change = Change('created', f.localPath, None, 'file')
+                        cfg.LOCAL_QUEUE.put(change)
                 else:
                     logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
                 recordsParsed += 1
@@ -590,7 +609,9 @@ def update_drive_files(service):
                         #else:
                         #    parent = create_drive_folder_tree(service, parentFolder)
                         #    f.properties['parents'] = parent.id
-                        file = update_drive_file(service, f, f.localPath)
+                        #file = update_drive_file(service, f, f.localPath)
+                        change = Change('modified', f.localPath, None, 'file')
+                        cfg.LOCAL_QUEUE.put(change)
                 else:
                     logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
                 recordsParsed += 1
@@ -704,7 +725,7 @@ def handle_changed_file(service, file:gFile = None):
                         full_path = os.path.expanduser(full_path)
                         cfg.LQUEUE_IGNORE.append(full_path)
                         download_file(service, file, full_path)
-                        cfg.LQUEUE_IGNORE.remove(full_path)
+                        #cfg.LQUEUE_IGNORE.remove(full_path)
             else:
                 # **** handle file updates ****
                 dbFile  = dbFiles[0]
@@ -741,7 +762,7 @@ def handle_changed_file(service, file:gFile = None):
                                                 os.remove(full_path)
                                             cfg.LQUEUE_IGNORE.append(full_path)
                                             download_file(service, file, full_path)
-                                            cfg.LQUEUE_IGNORE.remove(full_path)
+                                            #cfg.LQUEUE_IGNORE.remove(full_path)
                                         
 
                                         # do the rename
@@ -750,9 +771,9 @@ def handle_changed_file(service, file:gFile = None):
                                                 cfg.LQUEUE_IGNORE.append(full_path_old)
                                                 cfg.LQUEUE_IGNORE.append(full_path)
                                                 os.rename(full_path_old, full_path)
-                                                sleep(0.2) # give the Watchdog service time to catch up
-                                                cfg.LQUEUE_IGNORE.remove(full_path_old)
-                                                cfg.LQUEUE_IGNORE.remove(full_path)
+                                                #sleep(0.2) # give the Watchdog service time to catch up
+                                                #cfg.LQUEUE_IGNORE.remove(full_path_old)
+                                                #cfg.LQUEUE_IGNORE.remove(full_path)
 
                         except Exception as err:
                             logging.error("unable to update file id %s. %s" % (file.id, str(err)))
@@ -773,8 +794,8 @@ def handle_changed_file(service, file:gFile = None):
                                         logging.info("removing trashed file '%s'" % full_path)
                                         cfg.LQUEUE_IGNORE.append(full_path)
                                         os.remove(full_path)
-                                        sleep(0.2) # give the Watchdog service time to catch up
-                                        cfg.LQUEUE_IGNORE.remove(full_path)
+                                        #sleep(0.2) # give the Watchdog service time to catch up
+                                        #cfg.LQUEUE_IGNORE.remove(full_path)
                                 except Exception as err:
                                     logging.error("unable to remove local file %s. %s" % (full_path, str(err)))
 

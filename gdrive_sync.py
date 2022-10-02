@@ -8,6 +8,7 @@ import json
 import logging
 import os.path
 from datetime import datetime
+import queue
 
 # google and http imports
 from google.auth.transport.requests import Request
@@ -30,6 +31,7 @@ from local_modules.mods import *
 from local_modules.filewatcher import *
 
 # scans all files in Google drive that aren't in the db.  that's our change set.
+# this only needs to happen during startup.  otherwise, change notifications will do the job
 def get_gdrive_changes(service) -> List:
     # loop through the pages of files from google drive
     # return the md5Checksum property, along with name, id, mimeType, version, parents
@@ -56,7 +58,6 @@ def get_gdrive_changes(service) -> List:
                 rows = cfg.DATABASE.fetch_gObject(f['id'])
                 if len(rows) > 0:
                     dbFile = rows[0]
-                    
                 if f['mimeType'] == cfg.TYPE_GOOGLE_FOLDER:
                     googleFolder = gFolder(f)
                     if dbFile is not None and 'version' in dbFile.properties.keys():
@@ -69,12 +70,14 @@ def get_gdrive_changes(service) -> List:
                             get_req = gServiceFiles.get(**get_params)
                             full_folder = gFolder(get_req.execute())
                             full_folder.localPath = get_full_folder_path(service, full_folder)
-                            differences.append(full_folder)
+                            #differences.append(full_folder)
+                            cfg.REMOTE_QUEUE.put(full_folder)
                     else:
                         get_params = {"fileId": googleFolder.id, "fields": "*"}
                         get_req = gServiceFiles.get(**get_params)
                         full_folder = gFolder(get_req.execute())
-                        differences.append(full_folder)
+                        #differences.append(full_folder)
+                        cfg.REMOTE_QUEUE.put(full_folder)
                     
                 else:
                     googleFile = gFile(f)
@@ -87,13 +90,15 @@ def get_gdrive_changes(service) -> List:
                                 get_params = {"fileId": googleFile.id, "fields": "*"}
                                 get_req = gServiceFiles.get(**get_params)
                                 full_file = gFile(get_req.execute())
-                                differences.append(full_file)
+                                #differences.append(full_file)
+                                cfg.REMOTE_QUEUE.put(full_file)
                     else:
                         if cfg.TYPE_GOOGLE_APPS not in googleFile.mimeType:
                             get_params = {"fileId": googleFile.id, "fields": "*"}
                             get_req = gServiceFiles.get(**get_params)
                             full_file = gFile(get_req.execute())
-                            differences.append(full_file)
+                            #differences.append(full_file)
+                            cfg.REMOTE_QUEUE.put(full_file)
             request = gServiceFiles.list_next(request, files_page)
     except HttpError as err:
         #exc_type, exc_obj, exc_tb = sys.exc_info()
@@ -320,6 +325,8 @@ def main():
     #  end testing ground
     # **************************************************************
 
+
+
     # read the local cache and create linked folder tree objects
     folders = read_folder_cache_from_db()
 
@@ -342,14 +349,15 @@ def main():
     # get google drive changes
     # this is a full scan which should only be run upon the initial start up. 
     # once the program is running, it will subscribe to change notifications  
+    
     google_drive_changes = []
     google_drive_changes = get_gdrive_changes(service)
 
 
-    # *** multi-thread this in the future
-
-    logging.info("identified %d changes since the last run, reconciling." % len(google_drive_changes))
+    #logging.info("identified %d changes since the last run, reconciling." % len(google_drive_changes))
+    logging.info("identified %d changes since the last run, reconciling." % cfg.REMOTE_QUEUE.qsize())
     # run throught the folders first and get those created
+    '''
     if len(google_drive_changes) > 0:
         i = len(google_drive_changes) - 1
         for i in reversed(range(len(google_drive_changes))):
@@ -363,7 +371,9 @@ def main():
         for f in google_drive_changes:
             if cfg.TYPE_GOOGLE_APPS not in f.mimeType:
                 handle_changed_file(service, f)
+    '''
     
+
     # ******
     # ^^^^
     # there are some weird change sets things happening with the above.  need to figure out how filter those out or merge them
@@ -378,23 +388,24 @@ def main():
     update_drive_files(service)
 
 
+    # start local watcher for any changes to files locally
+    cfg.OBSERVER = Watcher(service)
+    cfg.OBSERVER.run()
+
+
     # start tracking changes
     #global CHANGES_TOKEN
     logging.info("initial sync complete. watching for Google drive changes.")
     logging.debug("fetching change token from google drive")
     cfg.CHANGES_TOKEN = get_drive_changes_token(service)
 
-    # start local watcher for any changes to files locally
-    cfg.OBSERVER = Watcher(service)
-    cfg.OBSERVER.run()
-
     # start remote watchers for any changs in Google Drive
-    thread_runner = threading.Thread(target=_runner, daemon=True)
+    #thread_runner = threading.Thread(target=_runner, daemon=True)
     threads = [threading.Thread(target=_worker, daemon=True)
                 for _ in range(cfg.MAX_THREADS // 2)]
     for t in threads:
         t.start()
-    thread_runner.start()
+    #thread_runner.start()
     
     try:
         while True:

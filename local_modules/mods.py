@@ -18,6 +18,9 @@ from datastore.sqlite_store import *
 from gDrive_modules.gDrive import *
 from config import config as cfg
 
+def test_func2():
+    print("test function 2")
+
 # fix up directories from config and make sure the paths exist
 def fixup_directory(path:str)-> str:
     try:
