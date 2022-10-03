@@ -16,10 +16,6 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-#from googleapiclient.http import MediaIoBaseDownload
-#import googleapiclient
-#import google_auth_httplib2
-#import httplib2
 from googleapiclient import discovery
 
 # application imports
@@ -128,6 +124,27 @@ def reconcile_local_files_with_db():
     cfg.DATABASE.clear_local_files()
     scan_local_files_mt(localDrivePath)
 
+    # the below logic is stupid and needs to be revised:
+
+    """
+        1. files not on disk
+            a. identify where files are in the db (with trashed:False) but not on disk
+            b. mark them as trashed in the db
+            c. increment their version by 1 in the db
+            d. compare with the Drive side using version and mod times
+                i. if our version on disk is newer, update the Drive side (delete the file)
+                ii. if the drive side is newer (by version of mod time), download the file from Drive
+        2. files on disk different from db by hash
+            a. look for files that don't match on both path and md5, pull the gObjects side
+            b. if the disk file is newer than what's in the db
+                i. update the db with the md5 of the file on disk
+                ii. update the db with the mod time of the file on disk
+                iii. update the db version by 1
+            c. compare with the files in Drive by version and mod time (and hash too)
+                i. where Drive wins, update local files
+                ii. where local wins, update Drive files
+    """
+
 
     # any files that are in the db but not on disk, purge the db records
     # don't delete files that are marked as trashed, otherwise we'll download them again
@@ -202,10 +219,6 @@ def _worker(lock=threading.Lock()):
                 logging.error("Error handling queue task. %s" % str(err))
             finally:
                 cfg.REMOTE_QUEUE.task_done()
-                #while cfg.LOCAL_QUEUE.unfinished_tasks > 0:
-                #    # wait for any resulting local operations are dequeued 
-                #    sleep(1)
-                #cfg.LQUEUE_IGNORE.remove(change.id)
     except Exception as err:
         logging.error("Error initializing remote queue worker. %s" % str(err))
 
@@ -324,8 +337,6 @@ def main():
        # **************************************************************
     #  end testing ground
     # **************************************************************
-
-
 
     # read the local cache and create linked folder tree objects
     folders = read_folder_cache_from_db()
@@ -476,7 +487,7 @@ def main():
 
     for t in threads:
         t.join()
-    thread_runner.join()
+    #thread_runner.join()
 
     service.close()
     cfg.DATABASE.close()

@@ -516,6 +516,7 @@ class sqlite_store:
 
     def delete_files_not_on_disk(self):
         try:
+
             delete_sql = 'DELETE FROM gObjects \
                             WHERE id IN (\
                             SELECT gObjects.id from gObjects\

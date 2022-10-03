@@ -715,7 +715,6 @@ def handle_changed_file(service, file:gFile = None):
             elif len(dbFiles) == 0:
                 # **** handle new files from Google Drive ****
                 logging.debug("file id %s isn't in the database, assuming a new object." % file.id)
-                cfg.DATABASE.insert_gObject(file=file)
                 if 'parents' in file.properties.keys():
                     for parent_id in file.properties['parents']:
                         parent_folder = get_drive_object(service, parent_id)
@@ -723,9 +722,13 @@ def handle_changed_file(service, file:gFile = None):
                             get_full_folder_path(service, parent_folder), \
                             file.name)
                         full_path = os.path.expanduser(full_path)
-                        cfg.LQUEUE_IGNORE.append(full_path)
-                        download_file(service, file, full_path)
-                        #cfg.LQUEUE_IGNORE.remove(full_path)
+                        file.localPath = full_path
+                        cfg.DATABASE.insert_gObject(file=file)
+    
+                        if file.properties['trashed'] == False:
+                            cfg.LQUEUE_IGNORE.append(full_path)
+                            download_file(service, file, full_path)
+                    
             else:
                 # **** handle file updates ****
                 dbFile  = dbFiles[0]
@@ -757,23 +760,24 @@ def handle_changed_file(service, file:gFile = None):
                                         # do the the redownload if the md5 doesn't match
                                         if file.properties['md5Checksum'] != dbFile.md5:
                                             logging.info("file id %s checksum is different and cloud version is newer, redownloading." % file.id)
-                                            if os.path.exists(full_path):
-                                                logging.info("removing outdated file '%s'." % full_path)
-                                                os.remove(full_path)
-                                            cfg.LQUEUE_IGNORE.append(full_path)
-                                            download_file(service, file, full_path)
-                                            #cfg.LQUEUE_IGNORE.remove(full_path)
-                                        
+                                            
+                                            if file.properties['trashed'] == False:
+                                                cfg.LQUEUE_IGNORE.append(full_path)
+                                                if os.path.exists(full_path):
+                                                    logging.info("removing outdated file '%s'." % full_path)
+                                                    os.remove(full_path)
+                                                download_file(service, file, full_path)
 
                                         # do the rename
                                         if file.name != dbFile.name:
                                             if root_path_old == root_path:
-                                                cfg.LQUEUE_IGNORE.append(full_path_old)
-                                                cfg.LQUEUE_IGNORE.append(full_path)
-                                                os.rename(full_path_old, full_path)
-                                                #sleep(0.2) # give the Watchdog service time to catch up
-                                                #cfg.LQUEUE_IGNORE.remove(full_path_old)
-                                                #cfg.LQUEUE_IGNORE.remove(full_path)
+                                                if file.properties['trashed'] == False:
+                                                    cfg.LQUEUE_IGNORE.append(full_path_old)
+                                                    cfg.LQUEUE_IGNORE.append(full_path)
+                                                    os.rename(full_path_old, full_path)
+                                                    #sleep(0.2) # give the Watchdog service time to catch up
+                                                    #cfg.LQUEUE_IGNORE.remove(full_path_old)
+                                                    #cfg.LQUEUE_IGNORE.remove(full_path)
 
                         except Exception as err:
                             logging.error("unable to update file id %s. %s" % (file.id, str(err)))

@@ -79,13 +79,19 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] delete files remotely
 
+[x] resumable uploads (in case the connection fails)
+
 [x] store the token.json contents in a key vault
 
 [x] multi-thread for uploads
 
 [x]] avoid double-processing changes (we download a file from Drive and detect that as a local change)
 
-[ ] on first scan, detect deleted files
+[x] multi-thread the merge functions
+
+[x] implement a queueing service for dealing with the merges
+
+[ ] on first scan, detect deleted files in local cache and update Drive.  (increment version and marked them as trashed)
 
 [ ] for uploading changes, need to compare modified times before changing the remote files
 
@@ -103,13 +109,7 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  
 
-[ ] multi-thread the merge functions
-
-[ ] implement a queueing service for dealing with the merges
-
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
-
-[ ] resumable uploads (in case the connection fails)
 
 [ ] handle file and directory moves
 
