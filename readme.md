@@ -1,6 +1,6 @@
 # Google Drive Sync Client for Linux
 
-> :warning: **This is a work in progress with not a lot of functionality yet.**
+> :warning: **This is a work in progress with limited functionality.**
 
 This is a Google Drive sync client for Linux.   It's written in Python and uses the Google Python APIs.  It's written as an oauth app.  
 
@@ -94,6 +94,10 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 [ ] on first scan, detect deleted files in local cache and update Drive.  (increment version and marked them as trashed)
 
 [ ] for uploading changes, need to compare modified times before changing the remote files
+
+[ ] Address the issue with sqlite thread locking.  We sometimes run into the "recursive cursor" errors.  Look to lock the updates.
+
+[ ] add retries via the queues.   add metadata for retries count and put the thing back on the queue
 
 [ ] change all silly while loops to queues and multi-thread that stuff
 

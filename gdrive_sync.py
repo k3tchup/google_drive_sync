@@ -110,7 +110,40 @@ def get_gdrive_changes(service) -> List:
         print(err)
     return differences
 
+def reconcile_local_files_with_db2():
+    try:
 
+        localDrivePath = os.path.expanduser(cfg.DRIVE_CACHE_PATH)
+
+        # loop through files on disk and find any that aren't in the db or different by hash
+        # hash the local files and stick them into a temp table along with the md5 hash
+        logging.info("starting to scan local Google drive cache in %s" % localDrivePath)
+        cfg.DATABASE.clear_local_files()
+        scan_local_files_mt(localDrivePath)
+        
+        """
+        1. files not on disk
+            a. identify where files are in the db (with trashed:False) but not on disk
+            b. mark them as trashed in the db
+            c. increment their version by 1 in the db
+            d. compare with the Drive side using version and mod times
+                i. if our version on disk is newer, update the Drive side (delete the file)
+                ii. if the drive side is newer (by version of mod time), download the file from Drive
+        """
+        # identify files not on disk and create a temp table with their ids
+        # also increment the file version and set trashed = true
+        # all database work after we've scanned the local cache directory
+        logging.info("identifying local files that have been deleted while the program wasn't running.")
+        cfg.DATABASE.identify_local_deleted()
+
+        # fetch the deleted objects for the db and put them on the local queue
+
+        **** to do *****
+
+
+
+    except Exception as err:
+        logging.error("Error reconciling local files with metadata db. %s" % str(err))
 
 # identify database entries of files not matching what's on disk.  delete the db entries.
 def reconcile_local_files_with_db():
@@ -143,6 +176,12 @@ def reconcile_local_files_with_db():
             c. compare with the files in Drive by version and mod time (and hash too)
                 i. where Drive wins, update local files
                 ii. where local wins, update Drive files
+            d. for any deletes, follow the above, but only delete if there isn't a db instance of the same path
+                with trashed:False.  (could be multiple versions of the same path in Drive, don't want to delete the wrong one.)
+
+        for the above, we probably want to stage the db changes first, then we can handle comparison with drive
+
+        we already handle new files on local disk well
     """
 
 
