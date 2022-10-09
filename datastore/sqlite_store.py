@@ -223,6 +223,32 @@ class sqlite_store:
         
         return results, totalFetched
 
+
+    def mark_changedLocalFiles(self):
+        logging.debug("Incrementing the version on locally changed files.")
+        try:
+            # start a transaction for atomicity
+            self.cursor.execute("BEGIN")
+
+            # increment the version of the file
+            update_sql = "UPDATE gObjects \
+                            SET properties = json_patch(properties, \
+                                '{\"version\":' || (json_extract(properties, '$.version')+1) || '}') \
+                            WHERE id IN ( \
+                            SELECT id FROM v_files_modified_locally);"
+
+            self.cursor.execute(update_sql)
+            self.conn.commit()
+
+        except sqlite3.Error as e:
+            logging.error("Unable to increment version on changed files. %s" % str(e))
+            self.cursor.execute("ROLLBACK;")
+        except Exception as e:
+            logging.error("Unable to increment version on changed files. %s" % str(e))
+            self.cursor.execute("ROLLBACK;")
+
+
+
     def fetch_changedLocalFiles(self, pageSize:int = 100, offset:int = 0):
         logging.debug("fetching local files that are newer vs what's in the cloud.")
         results = []
@@ -271,7 +297,7 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to fetch records. %s" % str(e))
         
-        return results, totalFetched
+        return totalFetched, results
     
     def fetch_gObjectSet(self, pageSize:int = 100, offset:int=0, searchField:str = None, searchCriteria:str=None):
         gObjects = []
@@ -530,15 +556,15 @@ class sqlite_store:
             self.cursor.execute(update_sql)
 
             # insert the deleted files ids into the temp table
-            update_sql = "INSERT INTO local_deleted \
-                            SELECT id FROM gObjects \
+            update_sql = "INSERT INTO local_deleted (deleted_id)\
+                            SELECT gObjects.id FROM gObjects \
                             LEFT JOIN local_files ON gObjects.local_path = local_files.path \
                             WHERE local_files.path IS null;"
             self.cursor.execute(update_sql)
 
             # set the files trashed attribute to true
             update_sql = "UPDATE gObjects \
-                            SET properties = json_patch(properties, '{\"trashed\":true}' \
+                            SET properties = json_patch(properties, '{" + '"' + 'trashed"' + ":true}') \
                             WHERE id IN ( \
                             SELECT deleted_id FROM local_deleted);"
             self.cursor.execute(update_sql)
@@ -554,16 +580,17 @@ class sqlite_store:
             self.conn.commit()          
 
         except sqlite3.Error as e:
-            logging.error("Unable to update parents for object id %s. %s" % (id, str(e)))
+            logging.error("Unable to update metadata for locally deleted files. %s" % str(e))
             self.cursor.execute("ROLLBACK;")
         except Exception as e:
-            logging.error("Unable to update parents for object id %s. %s" % (id, str(e)))   
+            logging.error("Unable to update metadata for locally deleted files. %s" % str(e))
             self.cursor.execute("ROLLBACK;") 
 
     def get_files_deleted_from_disk(self, pageSize:int = 100, offset:int = 0):
         deleted_objects = []
+        totalFetched = 0
         try:
-            fetch_sql = "SELECT id, name, mime_type, md5, local_path, properties FROM gObjects \
+            fetch_sql = "SELECT gObjects.id, name, mime_type, md5, local_path, properties FROM gObjects \
                             INNER JOIN local_deleted ON gObjects.id = local_deleted.deleted_id LIMIT ? OFFSET ?;"
 
             sqlParams = (pageSize, offset)
@@ -572,23 +599,23 @@ class sqlite_store:
             for row in rows:
                 try:
                     if row[2] == cfg.TYPE_GOOGLE_FOLDER:
-                        f = gFolder(row[5])
+                        f = gFolder(json.loads(row[5]))
                         f.localPath = row[4]
                     else:
-                        f = gFile(row[5])
+                        f = gFile(json.loads(row[5]))
                         f.localPath = row[4]
                         f.md5 = row[3]
                     deleted_objects.append(f)
                     totalFetched +=1
                 except Exception as err:
-                    logging.error("unable to fetch db objectgs of deleted files. %s" % str(err))
+                    logging.error("unable to fetch db objects of deleted files. %s" % str(err))
         
         except sqlite3.Error as e:
-            logging.error("Error fetching deleted files. %s" % (id, str(e)))
+            logging.error("Error fetching deleted files. %s" % str(e))
         except Exception as e:
-            logging.error("Error fetching deleted files. %s" % (id, str(e)))
+            logging.error("Error fetching deleted files. %s" % str(e))
 
-        return deleted_objects
+        return totalFetched, deleted_objects
 
 
     def delete_files_not_on_disk(self):

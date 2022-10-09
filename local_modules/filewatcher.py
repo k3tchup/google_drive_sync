@@ -170,10 +170,15 @@ class Watcher:
                 dbFile = dbFiles[0]
                 # upload the file to Drive if needed
                 if dbFile is not None:
-                    if dbFile.md5 != md5:
-                        dbFile.md5 = md5
-                        file = update_drive_file(service, dbFile, filePath)
-                        cfg.RQUEUE_IGNORE.append(file.id)
+                    # fetch the file metadata from Drive and only upload if our version is higher
+                    upstreamFile = get_drive_object(service, dbFile.id)
+                    if upstreamFile.properties['version'] < dbFile.properties['version']:
+                        if dbFile.md5 != md5:
+                            dbFile.md5 = md5
+                            file = update_drive_file(service, dbFile, filePath)
+                            cfg.RQUEUE_IGNORE.append(file.id)
+                    else:
+                        logging.error("Locally changed file '%s' is a lower version from the upstream file." % filePath)
             else:
                 # treat it as create a file
                 self.handle_file_create(service, filePath)

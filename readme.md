@@ -91,9 +91,9 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] implement a queueing service for dealing with the merges
 
-[ ] on first scan, detect deleted files in local cache and update Drive.  (increment version and marked them as trashed)
+[ ] on first scan, detect deleted files in local cache and update Drive.  (increment version and mark them as trashed)
 
-[ ] for uploading changes, need to compare modified times before changing the remote files
+[ ] for uploading changes, need to compare modified times before changing the remote files. entire local change handling needsa  refactor.
 
 [ ] Address the issue with sqlite thread locking.  We sometimes run into the "recursive cursor" errors.  Look to lock the updates.
 
