@@ -95,7 +95,7 @@ def read_folder_cache_from_db() -> List[dict]:
         gFolderObjects = []
         offset = 0
         while True:
-            files, rowsReturned = cfg.DATABASE.fetch_gObjectSet(offset=offset, searchField = "mime_type",\
+            rowsReturned, files = cfg.DATABASE.fetch_gObjectSet(offset=offset, searchField = "mime_type",\
                                      searchCriteria="application/vnd.google-apps.folder")
             if rowsReturned == 0:
                 break

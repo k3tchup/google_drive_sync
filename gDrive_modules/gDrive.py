@@ -465,7 +465,7 @@ def create_drive_folder_tree(service, folderPath:str) -> gFolder:
         currentFolder = cfg.ROOT_FOLDER_OBJECT.localPath
         for folder in folders:
             currentFolder = os.path.join(currentFolder, folder)
-            dbFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField="local_path", \
+            c, dbFolders = cfg.DATABASE.fetch_gObjectSet(searchField="local_path", \
                             searchCriteria=currentFolder)
             if len(dbFolders) == 0:
                 parent = create_drive_folder(service, folder, currentFolder, parent.id)
@@ -538,7 +538,7 @@ def upload_drive_file_simple(service, filePath:str, parentId:str=None)->gFile:
 def upload_new_local_files(service):
     logging.debug("starting to upload new local files to the cloud.")
     try:
-        new_local_files, records = cfg.DATABASE.fetch_newLocalFiles()
+        records, new_local_files = cfg.DATABASE.fetch_newLocalFiles()
         recordsParsed = 0
         while records > 0:
             for f in new_local_files:
@@ -547,7 +547,7 @@ def upload_new_local_files(service):
                         return
                     else:
                         parentFolder = os.path.dirname(f.localPath)
-                        db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                        c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                                     searchCriteria=parentFolder)
                         db_parentFolder = db_parentFolders[0]
                         if db_parentFolder is not None:
@@ -561,7 +561,7 @@ def upload_new_local_files(service):
                 else:
                     logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
                 recordsParsed += 1
-            new_local_files, records = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
+            records, new_local_files = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
     except Exception as err:
         logging.error("error uploading new files to the cloud. %s" % str(err))
 
@@ -592,9 +592,9 @@ def update_drive_file(service, file:gFile, localPath:str):
 def update_drive_files(service):
     logging.debug("starting to update changed local files to the cloud.")
     try:
-        changed_local_files, records = cfg.DATABASE.fetch_changedLocalFiles()
+        c, changed_local_files = cfg.DATABASE.fetch_changedLocalFiles()
         recordsParsed = 0
-        while records > 0:
+        while c > 0:
             for f in changed_local_files:
                 if cfg.ROOT_FOLDER_OBJECT.localPath in f.localPath:
                     if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
@@ -615,7 +615,7 @@ def update_drive_files(service):
                 else:
                     logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
                 recordsParsed += 1
-            changed_local_files, records = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
+            c, changed_local_files = cfg.DATABASE.fetch_newLocalFiles(offset=recordsParsed)
     except Exception as err:
         logging.error("error updating cloudfile '%s'. %s" % (f.name, str(err)))
 

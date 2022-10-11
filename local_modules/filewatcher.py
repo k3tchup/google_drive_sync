@@ -146,7 +146,7 @@ class Watcher:
             #md5 = hash_file(filePath)
             # get parent directory
             parentFolder = os.path.dirname(filePath)
-            db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+            c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                             searchCriteria=parentFolder)
             db_parentFolder = db_parentFolders[0]
             parent_id = None
@@ -165,14 +165,14 @@ class Watcher:
             # hash the file
             md5 = hash_file(filePath)
             # find the file in the database
-            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
+            c, dbFiles = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
                 # upload the file to Drive if needed
                 if dbFile is not None:
                     # fetch the file metadata from Drive and only upload if our version is higher
                     upstreamFile = get_drive_object(service, dbFile.id)
-                    if upstreamFile.properties['version'] < dbFile.properties['version']:
+                    if int(upstreamFile.properties['version']) < int(dbFile.properties['version']):
                         if dbFile.md5 != md5:
                             dbFile.md5 = md5
                             file = update_drive_file(service, dbFile, filePath)
@@ -187,7 +187,7 @@ class Watcher:
 
     def handle_file_delete(self, service, filePath:str):
         try:
-            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
+            c, dbFiles = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
                 # upload the file to Drive if needed
@@ -201,7 +201,7 @@ class Watcher:
 
     def handle_file_move(self, service, srcPath:str, dstPath:str):
         try:
-            dbFiles, c = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
+            c, dbFiles = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
             if len(dbFiles) > 0:
                 dbFile = dbFiles[0]
                 if dbFile is not None:
@@ -209,7 +209,7 @@ class Watcher:
                     oldParentFolder = os.path.dirname(srcPath)
                     parentFolder = os.path.dirname(dstPath)
                     if oldParentFolder != parentFolder:
-                        db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+                        c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                                         searchCriteria=parentFolder)
                         db_parentFolder = None
                         if c > 0:
@@ -256,7 +256,7 @@ class Watcher:
         try:
             # get parent directory
             parentFolder = os.path.dirname(srcPath)
-            db_parentFolders, c = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
+            c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                             searchCriteria=parentFolder)
             db_parentFolder = db_parentFolders[0]
             parent_id = None

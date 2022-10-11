@@ -221,7 +221,7 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to fetch records. %s" % str(e))
         
-        return results, totalFetched
+        return totalFetched, results
 
 
     def mark_changedLocalFiles(self):
@@ -335,7 +335,7 @@ class sqlite_store:
         except Exception as e:
             logging.error("Unable to fetch records. %s" % str(e))
 
-        return gObjects, totalFetched
+        return totalFetched, gObjects
 
 
     def fetch_deletedObjects(self, pageSize:int = 100, offset:int=0):
