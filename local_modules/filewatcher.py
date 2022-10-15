@@ -5,6 +5,7 @@
 import time
 import os
 import sys
+from pyparsing import null_debug_action
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 #import queue
@@ -140,6 +141,20 @@ class Watcher:
         if (self.observer.is_alive() == True):
             self.observer.stop
 
+    def get_latest_modified_file(self, files)->gFile:
+        max_id = 0
+        prev_mod_time = None
+        for f in files:
+            mod_time = \
+                datetime.datetime.strptime(f.properties['modifiedTime'][:-5], '%Y-%m-%dT%H:%M:%S')
+            if prev_mod_time is not None:
+                if mod_time > prev_mod_time:
+                    max_id += 1
+            prev_mod_time = mod_time
+
+        return files[max_id]
+        
+        
     def handle_file_create(self, service, filePath:str):
         try:
             # hash the file
@@ -167,7 +182,8 @@ class Watcher:
             # find the file in the database
             c, dbFiles = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
-                dbFile = dbFiles[0]
+                #dbFile = dbFiles[0]
+                dbFile = self.get_latest_modified_file(dbFiles)
                 # upload the file to Drive if needed
                 if dbFile is not None:
                     # fetch the file metadata from Drive and only upload if our version is higher
@@ -178,7 +194,7 @@ class Watcher:
                             file = update_drive_file(service, dbFile, filePath)
                             cfg.RQUEUE_IGNORE.append(file.id)
                     else:
-                        logging.error("Locally changed file '%s' is a lower version from the upstream file." % filePath)
+                        logging.debug("Locally changed file '%s' is a lower or same version as the upstream file." % filePath)
             else:
                 # treat it as create a file
                 self.handle_file_create(service, filePath)

@@ -464,6 +464,7 @@ def main():
     logging.info("looking for files changed since the last startup. this might take a bit of time.")
     # make sure local database is reconciled with what's on disk
     reconcile_local_files_with_db2()
+    logging.info("Identified %d local changes since the last run." % cfg.LOCAL_QUEUE.qsize())
 
     # get google drive changes
     # this is a full scan which should only be run upon the initial start up. 
@@ -502,21 +503,14 @@ def main():
     #          get local changes that are newer than what's in the cloud
     # ****************************************************************************
     # this gets done after the cloud sync is done and the database is current
-    logging.info("looking for local files that need to be added or updated in Google Drive")
-    upload_new_local_files(service)
-    update_drive_files(service)
+    #logging.info("looking for local files that need to be added or updated in Google Drive")
+    #upload_new_local_files(service)
+    #update_drive_files(service)
 
 
     # start local watcher for any changes to files locally
     cfg.OBSERVER = Watcher(service)
     cfg.OBSERVER.run()
-
-
-    # start tracking changes
-    #global CHANGES_TOKEN
-    logging.info("initial sync complete. watching for Google drive changes.")
-    logging.debug("fetching change token from google drive")
-    cfg.CHANGES_TOKEN = get_drive_changes_token(service)
 
     # start remote watchers for any changs in Google Drive
     #thread_runner = threading.Thread(target=_runner, daemon=True)
@@ -525,7 +519,17 @@ def main():
     for t in threads:
         t.start()
     #thread_runner.start()
-    
+
+    # sleep while the initial queue is handled
+    while cfg.LOCAL_QUEUE.qsize() > 0 or cfg.REMOTE_QUEUE.qsize() > 0:
+        sleep(5)
+
+    # start tracking changes
+    #global CHANGES_TOKEN
+    logging.info("initial sync complete. watching for Google drive changes.")
+    logging.debug("fetching change token from google drive")
+    cfg.CHANGES_TOKEN = get_drive_changes_token(service)
+
     try:
         while True:
             try:

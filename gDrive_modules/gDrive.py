@@ -217,6 +217,11 @@ def download_file(service, file: gFile, targetPath:str, threadSafeDB:sqlite_stor
         file.localPath = targetPath
         file.md5 = hash_file(targetPath)
 
+        # update the file timestamp to match what's in Drive
+        mod_time = int(datetime.datetime.strptime(file.properties['modifiedTime'][:-5], '%Y-%m-%dT%H:%M:%S').strftime("%s"))
+        os.utime(targetPath, (mod_time, mod_time))
+
+
         if threadSafeDB is not None:
             threadSafeDB.insert_gObject(file=file)
         else:
@@ -735,56 +740,61 @@ def handle_changed_file(service, file:gFile = None):
                 if file.properties != dbFile.properties and int(file.properties['version']) > int(dbFile.properties['version']):
                     # if the md5 is different for the file, then we are going to remove the local version and re-download
                     logging.info("file id %s is newer in the cloud and has changes, processing." % file.id)
-                    if (file.properties['trashed'] == False) and \
-                                (file.properties['md5Checksum'] != dbFile.md5 or file.name != dbFile.name):
-                        file.md5 = dbFile.md5 # we'll download it later if we need to
-                        cfg.DATABASE.update_gObject(file=file)
-                        try:
-                            # delete the existing files and redownload for each instance of the file
-                            if 'parents' in file.properties.keys():
-                                for parent_id in file.properties['parents']:
-                                    for db_parent_id in dbFile.properties['parents']:
-                                        parent_folder = get_drive_object(service, parent_id)
-                                        root_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
-                                            get_full_folder_path(service, parent_folder))
-                                        full_path = os.path.join(root_path, file.name)
-                                        full_path = os.path.expanduser(full_path)
+                    if (file.properties['trashed'] == False):
+                        file.localPath = dbFile.localPath
+                        if (file.properties['md5Checksum'] != dbFile.md5 or file.name != dbFile.name):
+                            file.md5 = dbFile.md5 # we'll download it later if we need to
+                            try:
+                                # delete the existing files and redownload for each instance of the file
+                                if 'parents' in file.properties.keys():
+                                    for parent_id in file.properties['parents']:
+                                        for db_parent_id in dbFile.properties['parents']:
+                                            parent_folder = get_drive_object(service, parent_id)
+                                            root_path = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                                get_full_folder_path(service, parent_folder))
+                                            full_path = os.path.join(root_path, file.name)
+                                            full_path = os.path.expanduser(full_path)
 
-                                        parent_folder = get_drive_object(service, db_parent_id)
-                                        root_path_old = os.path.join(cfg.DRIVE_CACHE_PATH, \
-                                            get_full_folder_path(service, parent_folder))
-                                        full_path_old = os.path.join(root_path_old, dbFile.name)
-                                        full_path_old = os.path.expanduser(full_path_old)
+                                            parent_folder = get_drive_object(service, db_parent_id)
+                                            root_path_old = os.path.join(cfg.DRIVE_CACHE_PATH, \
+                                                get_full_folder_path(service, parent_folder))
+                                            full_path_old = os.path.join(root_path_old, dbFile.name)
+                                            full_path_old = os.path.expanduser(full_path_old)
 
 
-                                        # do the the redownload if the md5 doesn't match
-                                        if file.properties['md5Checksum'] != dbFile.md5:
-                                            logging.info("file id %s checksum is different and cloud version is newer, redownloading." % file.id)
-                                            
-                                            if file.properties['trashed'] == False:
-                                                cfg.LQUEUE_IGNORE.append(full_path)
-                                                if os.path.exists(full_path):
-                                                    logging.info("removing outdated file '%s'." % full_path)
-                                                    os.remove(full_path)
-                                                download_file(service, file, full_path)
-
-                                        # do the rename
-                                        if file.name != dbFile.name:
-                                            if root_path_old == root_path:
+                                            # do the the redownload if the md5 doesn't match
+                                            if file.properties['md5Checksum'] != dbFile.md5:
+                                                logging.info("file id %s checksum is different and cloud version is newer, redownloading." % file.id)
+                                                
                                                 if file.properties['trashed'] == False:
-                                                    cfg.LQUEUE_IGNORE.append(full_path_old)
                                                     cfg.LQUEUE_IGNORE.append(full_path)
-                                                    os.rename(full_path_old, full_path)
-                                                    #sleep(0.2) # give the Watchdog service time to catch up
-                                                    #cfg.LQUEUE_IGNORE.remove(full_path_old)
-                                                    #cfg.LQUEUE_IGNORE.remove(full_path)
+                                                    if os.path.exists(full_path):
+                                                        logging.info("removing outdated file '%s'." % full_path)
+                                                        os.remove(full_path)
+                                                    download_file(service, file, full_path)
 
-                        except Exception as err:
-                            logging.error("unable to update file id %s. %s" % (file.id, str(err)))
+                                            # do the rename
+                                            if file.name != dbFile.name:
+                                                if root_path_old == root_path:
+                                                    if file.properties['trashed'] == False:
+                                                        cfg.LQUEUE_IGNORE.append(full_path_old)
+                                                        cfg.LQUEUE_IGNORE.append(full_path)
+                                                        os.rename(full_path_old, full_path)
+                                                        cfg.DATABASE.update_gObject(file=file)
+                                                        #sleep(0.2) # give the Watchdog service time to catch up
+                                                        #cfg.LQUEUE_IGNORE.remove(full_path_old)
+                                                        #cfg.LQUEUE_IGNORE.remove(full_path)
+
+                            except Exception as err:
+                                logging.error("unable to update file id %s. %s" % (file.id, str(err)))
+                        else:
+                            file.md5 = dbFile.md5
+                            cfg.DATABASE.update_gObject(file=file)
 
                     # ***** delete a local file ******
-                    if file.properties['trashed'] == True:
+                    elif file.properties['trashed'] == True:
                         file.md5 = dbFile.md5
+                        file.localPath = dbFile.localPath
                         cfg.DATABASE.update_gObject(file=file)
                         if 'parents' in file.properties.keys():
                             for parent_id in file.properties['parents']:
