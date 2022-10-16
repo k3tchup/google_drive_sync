@@ -656,7 +656,12 @@ def delete_drive_file(service, file:gFile):
         cfg.DATABASE.delete_gObject(id=file.id) # do we want to delete the file?  or just mark it as trashed?
 
     except HttpError as err:
-        logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))
+        # 404, delete from db since it's gone from Drive
+        if err.resp.status == 404:
+            logging.info("File not found in Drive, removing from db.")
+            cfg.DATABASE.delete_gObject(id=file.id) # do we want to delete the file?  or just mark it as trashed?
+        else:
+            logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))
     except Exception as err:
         logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))
     return file    
@@ -844,6 +849,7 @@ def handle_changed_folder(service, folder: gFolder = None):
                             folder.name)
                         full_path = os.path.expanduser(full_path)
                         if not os.path.exists(full_path):
+                            cfg.LQUEUE_IGNORE.append(full_path)
                             logging.info("creating new local folder '%s'" % full_path)
                             os.mkdir(os.path.expanduser(full_path))
 
@@ -872,6 +878,8 @@ def handle_changed_folder(service, folder: gFolder = None):
                                 full_path_old = os.path.expanduser(full_path_old)
 
                                 if root_path_old == root_path_new:
+                                    cfg.LQUEUE_IGNORE.append(full_path_new)
+                                    cfg.LQUEUE_IGNORE.append(full_path_old)
                                     os.rename(full_path_old, full_path_new)
                 
                     # ***** delete a local folder ******
@@ -884,6 +892,7 @@ def handle_changed_folder(service, folder: gFolder = None):
                                     folder.name)
                                 full_path = os.path.expanduser(full_path)
                                 if os.path.exists(full_path):
+                                    cfg.LQUEUE_IGNORE.append(full_path)
                                     logging.info("removing trashed directory '%s'" % full_path)
                                     shutil.rmtree(full_path)
                             

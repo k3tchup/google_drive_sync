@@ -1,6 +1,6 @@
 # Google Drive Sync Client for Linux
 
-> :warning: **This is a work in progress with limited functionality.**
+> :warning: **This is a work in progress. There are still bugs and missing functionality.**
 
 This is a Google Drive sync client for Linux.   It's written in Python and uses the Google Python APIs.  It's written as an oauth app.  
 
@@ -95,15 +95,23 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] when downloading a file, need to set its modified time to what's in Drive (otherwise version comparison won't work)
 
-[ ] on first scan, detect deleted files in local cache and update Drive.  (increment version and mark them as trashed)
+[x] on first scan, detect deleted files in local cache and update Drive.  (increment version and mark them as trashed)
 
-[ ] for uploading changes, need to compare modified times before changing the remote files. entire local change handling needsa  refactor.
+[x] for uploading changes, need to compare modified times before changing the remote files. entire local change handling needsa  refactor.
+
+[x] change all silly while loops to queues and multi-thread that stuff
+
+[x] handle file and directory moves
+
+[x] add local file watcher to detect changes to the cache folder immediately
+
+[x] move the local database cache and other variable data into the user's home directory
+
+[x] better error handling
 
 [ ] Address the issue with sqlite thread locking.  We sometimes run into the "recursive cursor" errors.  Look to lock the updates.
 
 [ ] add retries via the queues.   add metadata for retries count and put the thing back on the queue
-
-[ ] change all silly while loops to queues and multi-thread that stuff
 
 [ ] progress estimates for large downloads and uploads (both large by size and by number of files)
 
@@ -119,23 +127,11 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
 
-[ ] handle file and directory moves
-
-- this is done for local moves of files
-- still need to handle directories locally
-- still need to handle moves in the cloud as well
-
-[ ] add local file watcher to detect changes to the cache folder immediately
-
 [ ] clear out trashed files after they expire on Google's side
 
 [ ] there are instances when folders with the same name just inherit the same id when a few folder is crated with the same name.  need to debug this.
 
 [ ] figure out why there are duplicate files with the same name and hash.  something to do with change sets.
-
-[ ] move the local database cache and other variable data into the user's home directory
-
-[ ] better error handling
 
 [ ] bandwidth management
 - the google modules call http2 classes.  can we just set limits there?
