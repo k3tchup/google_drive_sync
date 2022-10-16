@@ -653,7 +653,7 @@ def delete_drive_file(service, file:gFile):
         gSerivceFiles.delete(fileId = file.id).execute()
         logging.info("deleted Google Drive file with id %s" % file.id)
         #cfg.DATABASE.update_gObject(file=file)
-        cfg.DATABASE.delete_gObject(id=file.id)
+        cfg.DATABASE.delete_gObject(id=file.id) # do we want to delete the file?  or just mark it as trashed?
 
     except HttpError as err:
         logging.error("error deleteing file '%s' from Google Drive. %s" % (file.name, str(err)))

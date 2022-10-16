@@ -93,7 +93,7 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] when fetching a file from local db, if multiple entries for the same path exist, pick the one that's the latest modified one and not deleted, if possible.   if all are deleted, then delete the file.  line 170 in filewatcher.py
 
-[ ] when downloading a file, need to set its modified time to what's in Drive (otherwise version comparison won't work)
+[x] when downloading a file, need to set its modified time to what's in Drive (otherwise version comparison won't work)
 
 [ ] on first scan, detect deleted files in local cache and update Drive.  (increment version and mark them as trashed)
 

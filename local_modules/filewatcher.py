@@ -141,15 +141,15 @@ class Watcher:
         if (self.observer.is_alive() == True):
             self.observer.stop
 
-    def get_latest_modified_file(self, files)->gFile:
+    def get_latest_modified_file(self, files):
         max_id = 0
         prev_mod_time = None
-        for f in files:
+        for idx, f in enumerate(files):
             mod_time = \
                 datetime.datetime.strptime(f.properties['modifiedTime'][:-5], '%Y-%m-%dT%H:%M:%S')
             if prev_mod_time is not None:
                 if mod_time > prev_mod_time:
-                    max_id += 1
+                    max_id = idx
             prev_mod_time = mod_time
 
         return files[max_id]
@@ -163,7 +163,7 @@ class Watcher:
             parentFolder = os.path.dirname(filePath)
             c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                             searchCriteria=parentFolder)
-            db_parentFolder = db_parentFolders[0]
+            db_parentFolder = self.get_latest_modified_file(db_parentFolders)
             parent_id = None
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]
@@ -219,7 +219,7 @@ class Watcher:
         try:
             c, dbFiles = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = srcPath)
             if len(dbFiles) > 0:
-                dbFile = dbFiles[0]
+                dbFile = self.get_latest_modified_file(dbFiles)
                 if dbFile is not None:
                     # get new parent
                     oldParentFolder = os.path.dirname(srcPath)
@@ -274,7 +274,7 @@ class Watcher:
             parentFolder = os.path.dirname(srcPath)
             c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                             searchCriteria=parentFolder)
-            db_parentFolder = db_parentFolders[0]
+            db_parentFolder = self.get_latest_modified_file(db_parentFolders)
             parent_id = None
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]

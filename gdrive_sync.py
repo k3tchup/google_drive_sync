@@ -113,7 +113,7 @@ def get_gdrive_changes(service) -> List:
 def reconcile_local_files_with_db2():
     try:
 
-        localDrivePath = os.path.expanduser(cfg.DRIVE_CACHE_PATH)
+        localDrivePath = os.path.expanduser(os.path.join(cfg.DRIVE_CACHE_PATH, cfg.ROOT_FOLDER_OBJECT.name))
 
         # loop through files on disk and find any that aren't in the db or different by hash
         # hash the local files and stick them into a temp table along with the md5 hash
@@ -521,8 +521,12 @@ def main():
     #thread_runner.start()
 
     # sleep while the initial queue is handled
-    while cfg.LOCAL_QUEUE.qsize() > 0 or cfg.REMOTE_QUEUE.qsize() > 0:
+    while (cfg.LOCAL_QUEUE.qsize() > 0 or cfg.REMOTE_QUEUE.qsize() > 0):
         sleep(5)
+
+    # clear any ignores while we were handling the initial sync
+    cfg.LQUEUE_IGNORE.clear()
+    cfg.RQUEUE_IGNORE.clear()
 
     # start tracking changes
     #global CHANGES_TOKEN
@@ -539,14 +543,15 @@ def main():
                 # grab full metadata for all the files first so that we can make informed decisions on the fly
                 #enrichedChanges = []
                 for change in changes:
-                    gObject = get_drive_object(service, change['fileId'])
-                    #enrichedChanges.append(gObject)
-                    if gObject.id not in cfg.RQUEUE_IGNORE:
-                        cfg.REMOTE_QUEUE.put(gObject)
+                    if (change['fileId'] in cfg.RQUEUE_IGNORE):
+                        cfg.RQUEUE_IGNORE.remove(change['fileId'])
                     else:
-                        cfg.RQUEUE_IGNORE.remove(gObject.id)
-
-
+                        gObject = get_drive_object(service, change['fileId'])
+                        #enrichedChanges.append(gObject)
+                        if gObject.id not in cfg.RQUEUE_IGNORE:
+                            cfg.REMOTE_QUEUE.put(gObject)
+                        else:
+                            cfg.RQUEUE_IGNORE.remove(gObject.id)
                
                 '''
                 # handle removes first
