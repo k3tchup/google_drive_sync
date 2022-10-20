@@ -19,12 +19,12 @@ from googleapiclient.errors import HttpError
 from googleapiclient import discovery
 
 # application imports
-from gDrive_data_structures.data_types import *
-from datastore.sqlite_store import *
+from libdata.data_types import *
+from libdata.sqlite_store import *
 from config import config as cfg
-from gDrive_modules.gDrive import *
-from local_modules.mods import *
-from local_modules.filewatcher import *
+from libgdrive.gDrive import *
+from lib.mods import *
+from lib.filewatcher import *
 
 # scans all files in Google drive that aren't in the db.  that's our change set.
 # this only needs to happen during startup.  otherwise, change notifications will do the job

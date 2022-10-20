@@ -25,10 +25,10 @@ from googleapiclient import discovery
 current = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current)
 sys.path.append(parent)
-from gDrive_data_structures.data_types import *
-from datastore.sqlite_store import *
-from local_modules.mods import *
-from local_modules.keyring import *
+from libdata.data_types import *
+from libdata.sqlite_store import *
+from lib.mods import *
+from lib.keyring import *
 #from local_modules.filewatcher import Change
 from config import config as cfg
 
