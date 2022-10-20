@@ -109,6 +109,8 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 
 [x] better error handling
 
+[x] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  - we just won't download them.  doesn't make sense to export them and import them.
+
 [ ] Address the issue with sqlite thread locking.  We sometimes run into the "recursive cursor" errors.  Look to lock the updates.
 
 [ ] add retries via the queues.   add metadata for retries count and put the thing back on the queue
@@ -122,8 +124,6 @@ The OS keyring is used to stored the access and refresh tokens.  This must be se
 ```
 - mostly there
 - still need to add more supported foramts. what are they?
-
-[ ] figure out what to do with native docs we exported to docx/xslx/etc.  we don't want to put them back on the next sync.   do we want to flag them somewhere?  
 
 [ ] is there a way to grab total size of drive from the API without recursing through all the files?
 

@@ -29,12 +29,12 @@ from libdata.data_types import *
 from libdata.sqlite_store import *
 from lib.mods import *
 from lib.keyring import *
-#from local_modules.filewatcher import Change
 from config import config as cfg
 
 # data structure for queueing changes
+"""
 class Change:
-    def __init__(self, change: str = "", src_object=None, dst_object=None, type=""):
+    def __init__(self, change: str = "", src_object=None, dst_object=None, type="", retry=0):
         if change not in ['modified', 'created', 'deleted', 'moved', 'closed']:
             raise "Invalid change type '%s'" % change
         if type not in ['file', 'directory']:
@@ -43,6 +43,8 @@ class Change:
         self.object_type=type
         self.change_object = src_object
         self.dst_object = dst_object
+        self.retry = retry
+"""
 
 def test_func():
     print("test function called")
