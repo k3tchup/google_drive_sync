@@ -1,13 +1,12 @@
 #!/usr/bin/env python3.8
 
 from __future__ import print_function
-from shelve import DbfilenameShelf
+#from shelve import DbfilenameShelf
 from time import sleep
 from typing import List
 import json
 import logging
 import os.path
-from datetime import datetime
 import queue
 
 # google and http imports
@@ -21,197 +20,16 @@ from googleapiclient import discovery
 # application imports
 from libdata.data_types import *
 from libdata.sqlite_store import *
+from libdata import sqlite_store
 from config import config as cfg
 from libgdrive.gDrive import *
 from lib.mods import *
 from lib.filewatcher import *
 
-# scans all files in Google drive that aren't in the db.  that's our change set.
-# this only needs to happen during startup.  otherwise, change notifications will do the job
-def get_gdrive_changes(service) -> List:
-    # loop through the pages of files from google drive
-    # return the md5Checksum property, along with name, id, mimeType, version, parents
-    # compare files by id with the db.  look where the md5Checksum != md5 stored in the db
-    # also look for files not in the db
-    # important: if the file in google drive is a later version, it's authoritative
-    # this will be the changes from the side of google drive
-    
-    logging.info("scanning google drive files, looking for files and folders that have changed.")
-    differences = []
-    try:
-        gServiceFiles = service.files()
-        params = { "q": "'me' in owners",
-                    "pageSize": cfg.PAGE_SIZE, 
-                    "fields": "nextPageToken," + "files(id, name, mimeType, version, md5Checksum, parents, ownedByMe)"
-        }
-        request = gServiceFiles.list(**params)
-
-        while (request is not None):
-            files_page = request.execute()
-            fs = files_page.get('files', [])
-            for f in fs:
-                dbFile = None
-                rows = cfg.DATABASE.fetch_gObject(f['id'])
-                if len(rows) > 0:
-                    dbFile = rows[0]
-                if f['mimeType'] == cfg.TYPE_GOOGLE_FOLDER:
-                    googleFolder = gFolder(f)
-                    if dbFile is not None and 'version' in dbFile.properties.keys():
-                        # if (dbFile.id != googleFolder.id or \
-                        #            dbFile.name != googleFolder.name) and \
-                        #            dbFile.properties['version'] < googleFolder.properties['version']:
-                        if (int(dbFile.properties['version']) < int(googleFolder.properties['version'])):
-                            # fetch full metadata of the file
-                            get_params = {"fileId": googleFolder.id, "fields": "*"}
-                            get_req = gServiceFiles.get(**get_params)
-                            full_folder = gFolder(get_req.execute())
-                            full_folder.localPath = get_full_folder_path(service, full_folder)
-                            #differences.append(full_folder)
-                            cfg.REMOTE_QUEUE.put(full_folder)
-                    else:
-                        get_params = {"fileId": googleFolder.id, "fields": "*"}
-                        get_req = gServiceFiles.get(**get_params)
-                        full_folder = gFolder(get_req.execute())
-                        #differences.append(full_folder)
-                        cfg.REMOTE_QUEUE.put(full_folder)
-                    
-                else:
-                    googleFile = gFile(f)
-                    if dbFile is not None and 'version' in dbFile.properties.keys():
-                        #if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
-                        #    dbFile.mimeType != googleFile.mimeType) and \
-                        #    dbFile.properties['version'] < googleFile.properties['version']:
-                        if (int(dbFile.properties['version']) < int(googleFile.properties['version'])):
-                                # fetch full metadata of the file
-                                get_params = {"fileId": googleFile.id, "fields": "*"}
-                                get_req = gServiceFiles.get(**get_params)
-                                full_file = gFile(get_req.execute())
-                                #differences.append(full_file)
-                                cfg.REMOTE_QUEUE.put(full_file)
-                    else:
-                        if cfg.TYPE_GOOGLE_APPS not in googleFile.mimeType:
-                            get_params = {"fileId": googleFile.id, "fields": "*"}
-                            get_req = gServiceFiles.get(**get_params)
-                            full_file = gFile(get_req.execute())
-                            #differences.append(full_file)
-                            cfg.REMOTE_QUEUE.put(full_file)
-            request = gServiceFiles.list_next(request, files_page)
-    except HttpError as err:
-        #exc_type, exc_obj, exc_tb = sys.exc_info()
-        #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        #logging.error(exc_type, fname, exc_tb.tb_lineno)
-        logging.error("error scanning google drive files. %s" % str(err))
-        print(err)
-    except Exception as err:
-        #exc_type, exc_obj, exc_tb = sys.exc_info()
-        #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        #logging.error(exc_type, fname, exc_tb.tb_lineno)
-        logging.error("error scanning google drive files. %s" % str(err))
-        print(err)
-    return differences
-
-def reconcile_local_files_with_db2():
-    try:
-
-        localDrivePath = os.path.expanduser(os.path.join(cfg.DRIVE_CACHE_PATH, cfg.ROOT_FOLDER_OBJECT.name))
-
-        # loop through files on disk and find any that aren't in the db or different by hash
-        # hash the local files and stick them into a temp table along with the md5 hash
-        logging.info("starting to scan local Google drive cache in %s" % localDrivePath)
-        cfg.DATABASE.clear_local_files()
-        scan_local_files_mt(localDrivePath)
-        
-        """
-        1. files not on disk but in the db (deleted files)
-            a. identify where files are in the db (with trashed:False) but not on disk
-            b. mark them as trashed in the db
-            c. increment their version by 1 in the db
-            d. compare with the Drive side using version and mod times
-                i. if our version on disk is newer, update the Drive side (delete the file)
-                ii. if the drive side is newer (by version of mod time), download the file from Drive
-        """
-        # identify files not on disk and create a temp table with their ids
-        # also increment the file version and set trashed = true
-        # all database work after we've scanned the local cache directory
-        logging.info("identifying local files that have been deleted while the program wasn't running.")
-        cfg.DATABASE.identify_local_deleted()
-
-        # fetch the deleted objects for the db and put them on the local queue
-        filesProcessed = 0
-        c = 1
-        while c > 0:
-            c, deletedFiles = cfg.DATABASE.get_files_deleted_from_disk(pageSize = 100, offset = filesProcessed) 
-            for f in deletedFiles:
-                try:
-                    logging.info("File or folder '%s' was deleted locally. Processing." % f.localPath)
-                    if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
-                        change = Change(change="deleted", src_object=f.localPath, dst_object = None, type = "directory")
-                    else:
-                        change = Change(change="deleted", src_object=f.localPath, dst_object = None, type = "file")
-                    cfg.LOCAL_QUEUE.put(change)
-                except Exception as err:
-                    logging.error("Error adding local change '%s' to queue. %s" % f.localPath, str(err))          
-
-            filesProcessed += c
-
-        """
-        2. files on disk different from db by hash
-            a. look for files that don't match on both path and md5, pull the gObjects side
-            b. if the disk file is newer than what's in the db
-                i. update the db with the md5 of the file on disk
-                ii. update the db with the mod time of the file on disk
-                iii. update the db version by 1
-            c. compare with the files in Drive by version and mod time (and hash too)
-                i. where Drive wins, update local files
-                ii. where local wins, update Drive files
-            d. for any deletes, follow the above, but only delete if there isn't a db instance of the same path
-                with trashed:False.  (could be multiple versions of the same path in Drive, don't want to delete the wrong one.)
-        """
-
-        cfg.DATABASE.mark_changedLocalFiles()
-        filesProcessed = 0
-        c = 1
-        while c > 0:
-            c, changedFiles = cfg.DATABASE.fetch_changedLocalFiles(pageSize = 100, offset = filesProcessed)
-            for f in changedFiles:
-                logging.info("File or folder '%s' change locally. Processing." % f.localPath)
-                try:
-                    if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
-                        change = Change(change="closed", src_object=f.localPath, dst_object = None, type = "directory")
-                    else:
-                        change = Change(change="closed", src_object=f.localPath, dst_object = None, type = "file")
-                    cfg.LOCAL_QUEUE.put(change)
-                except Exception as err:
-                    logging.error("Error adding local change '%s' to queue. %s" % f.localPath, str(err))    
-
-            filesProcessed += c      
-
-        """
-        3. new files on disk
-            a. look for files that are on disk but not in the db
-            b. put there right into the local queue for uploading
-        """
-        filesProcessed = 0
-        c = 1
-        while c > 0:
-            c, newFiles = cfg.DATABASE.fetch_newLocalFiles(pageSize = 100, offset = filesProcessed)
-            for f in newFiles:
-                logging.info("File or folder '%s' is new. Processing." % f.localPath)
-                try:
-                    if f.mimeType == cfg.TYPE_GOOGLE_FOLDER:
-                        change = Change(change="created", src_object=f.localPath, dst_object = None, type = "directory")
-                    else:
-                        change = Change(change="created", src_object=f.localPath, dst_object = None, type = "file")
-                    cfg.LOCAL_QUEUE.put(change)
-                except Exception as err:
-                    logging.error("Error adding local change '%s' to queue. %s" % f.localPath, str(err))    
-
-            filesProcessed += c      
-
-    except Exception as err:
-        logging.error("Error reconciling local files with metadata db. %s" % str(err))
 
 # identify database entries of files not matching what's on disk.  delete the db entries.
+
+'''
 def reconcile_local_files_with_db():
     localDrivePath = os.path.expanduser(cfg.DRIVE_CACHE_PATH)
 
@@ -291,6 +109,8 @@ def reconcile_local_files_with_db():
             break
     
     return
+
+'''
 
 def _runner():
     try:
@@ -383,7 +203,7 @@ def main():
     """
     logging.info("initialize local metadata store.")
     #global DATABASE
-    cfg.DATABASE = sqlite_store()
+    cfg.DATABASE = sqlite_store.sqlite_store()
     if not os.path.exists(cfg.DATABASE_PATH):
         cfg.DATABASE.create_db(dbPath=cfg.DATABASE_PATH)
 

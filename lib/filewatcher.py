@@ -5,20 +5,30 @@
 import time
 import os
 import sys
-from pyparsing import null_debug_action
+import json
+from datetime import datetime
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
-#import queue
+from google.oauth2.credentials import Credentials
+import google_auth_httplib2
+import httplib2
+from googleapiclient import discovery
+from time import sleep
 import threading
+
 
 # application imports
 current = os.path.dirname(os.path.realpath(__file__))
 parent = os.path.dirname(current)
 sys.path.append(parent)
 from libdata.data_types import *
-from libgdrive.gDrive import *
-from libdata.sqlite_store import *
-from lib.mods import *
+#from libgdrive.gDrive import *
+from libgdrive import gDrive
+from libdata import sqlite_store
+#from libdata.sqlite_store import *
+from lib import mods
+#from lib.mods import *
+from lib.keyring import *
 from config import config as cfg
 
 
@@ -73,7 +83,7 @@ class Watcher:
             logging.error("local file watcher stopped. %s" % str(err))
 
     def upload_drive_file(self, service, filePath: str, parentId: str = None) -> gFile:
-        file = upload_drive_file(service, filePath, parentId)
+        file = gDrive.upload_drive_file(service, filePath, parentId)
         return file
 
 
@@ -96,7 +106,7 @@ class Watcher:
             else:
                 credentials = Credentials.from_authorized_user_file(cfg.TOKEN_CACHE, cfg.TARGET_SCOPES)
             authorized_http = google_auth_httplib2.AuthorizedHttp(credentials, http=httplib2.Http())
-            service = discovery.build('drive', 'v3', requestBuilder=build_request, http=authorized_http)
+            service = discovery.build('drive', 'v3', requestBuilder=gDrive.build_request, http=authorized_http)
             #service=self.service
             # give the remote queue a chance to clear before we initialize workers
             while cfg.REMOTE_QUEUE.qsize() > 0:
@@ -147,7 +157,7 @@ class Watcher:
         prev_mod_time = None
         for idx, f in enumerate(files):
             mod_time = \
-                datetime.datetime.strptime(f.properties['modifiedTime'][:-5], '%Y-%m-%dT%H:%M:%S')
+                datetime.strptime(f.properties['modifiedTime'][:-5], '%Y-%m-%dT%H:%M:%S')
             if prev_mod_time is not None:
                 if mod_time > prev_mod_time:
                     max_id = idx
@@ -169,7 +179,7 @@ class Watcher:
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]
             else:
-                parent = create_drive_folder_tree(service, parentFolder)
+                parent = gDrive.create_drive_folder_tree(service, parentFolder)
                 parent_id = parent.id
             file = self.upload_drive_file(service, filePath, parent_id)
             cfg.RQUEUE_IGNORE.append(file.id)
@@ -179,7 +189,7 @@ class Watcher:
     def handle_file_change(self, service, filePath:str):
         try:
             # hash the file
-            md5 = hash_file(filePath)
+            md5 = mods.hash_file(filePath)
             # find the file in the database
             c, dbFiles = cfg.DATABASE.fetch_gObjectSet(searchField = 'local_path', searchCriteria = filePath)
             if len(dbFiles) > 0:
@@ -188,12 +198,12 @@ class Watcher:
                 # upload the file to Drive if needed
                 if dbFile is not None:
                     # fetch the file metadata from Drive and only upload if our version is higher
-                    upstreamFile = get_drive_object(service, dbFile.id)
+                    upstreamFile = gDrive.get_drive_object(service, dbFile.id)
                     if (int(upstreamFile.properties['version']) < int(dbFile.properties['version'])) or \
                             (upstreamFile.properties['md5Checksum'] != md5):
                         if dbFile.md5 != md5:
                             dbFile.md5 = md5
-                            file = update_drive_file(service, dbFile, filePath)
+                            file = gDrive.update_drive_file(service, dbFile, filePath)
                             cfg.RQUEUE_IGNORE.append(file.id)
                     else:
                         logging.debug("Locally changed file '%s' is a lower or same version as the upstream file." % filePath)
@@ -210,7 +220,7 @@ class Watcher:
                 dbFile = dbFiles[0]
                 # upload the file to Drive if needed
                 if dbFile is not None:
-                    delete_drive_file(service, dbFile)
+                    gDrive.delete_drive_file(service, dbFile)
                     cfg.RQUEUE_IGNORE.append(dbFile.id)
             else:
                 logging.error("Deleted file '%s' wasn't found in metadata database." % filePath)
@@ -236,9 +246,9 @@ class Watcher:
                         if db_parentFolder is not None:
                             parent_id = db_parentFolder.id
                         else:
-                            parent = create_drive_folder_tree(service, parentFolder)
+                            parent = gDrive.create_drive_folder_tree(service, parentFolder)
                             parent_id = parent.id
-                        move_drive_file(service=service, file=dbFile, newParent_id = parent_id, newName=None)
+                        gDrive.move_drive_file(service=service, file=dbFile, newParent_id = parent_id, newName=None)
                         cfg.RQUEUE_IGNORE.append(dbFile.id)
                         dbFile.properties['parents'] = [parent_id]
                         dbFile.localPath = dstPath
@@ -248,7 +258,7 @@ class Watcher:
                             cfg.DATABASE.update_gObject(folder=dbFile)
                     else:
                         newFileName = os.path.basename(dstPath)
-                        move_drive_file(service=service, file=dbFile, newParent_id=None, newName=newFileName)
+                        gDrive.move_drive_file(service=service, file=dbFile, newParent_id=None, newName=newFileName)
                         cfg.RQUEUE_IGNORE.append(dbFile.id)
                         dbFile.name = newFileName
                         dbFile.properties['name'] = newFileName
@@ -281,9 +291,9 @@ class Watcher:
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]
             else:
-                parent = create_drive_folder_tree(service, parentFolder)
+                parent = gDrive.create_drive_folder_tree(service, parentFolder)
                 parent_id = parent.id
-            folder = create_drive_folder(service, os.path.basename(srcPath), srcPath, parent_id)
+            folder = gDrive.create_drive_folder(service, os.path.basename(srcPath), srcPath, parent_id)
         except Exception as err:
             logging.error("Error creating directory '%s'. %s" % (srcPath, str(err)))
     

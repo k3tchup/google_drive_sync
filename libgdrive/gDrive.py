@@ -27,9 +27,11 @@ parent = os.path.dirname(current)
 sys.path.append(parent)
 from libdata.data_types import *
 from libdata.sqlite_store import *
-from lib.mods import *
-from lib.keyring import *
+from lib import mods
+from lib import keyring
+from lib import filewatcher
 from config import config as cfg
+#from lib.mods import *
 
 # data structure for queueing changes
 """
@@ -56,7 +58,7 @@ def login_to_drive():
     # created automatically when the authorization flow completes for the first
     # time.
     if cfg.USE_KEYRING == True:
-        kr = Keyring()
+        kr = keyring.Keyring()
     else:
         kr = None
 
@@ -217,7 +219,7 @@ def download_file(service, file: gFile, targetPath:str, threadSafeDB:sqlite_stor
             f.write(fileData.getbuffer())
 
         file.localPath = targetPath
-        file.md5 = hash_file(targetPath)
+        file.md5 = mods.hash_file(targetPath)
 
         # update the file timestamp to match what's in Drive
         mod_time = int(datetime.datetime.strptime(file.properties['modifiedTime'][:-5], '%Y-%m-%dT%H:%M:%S').strftime("%s"))
@@ -497,7 +499,7 @@ def upload_drive_file(service, filePath:str, parentId:str = None)-> gFile:
         while attempt <= cfg.UPLOAD_RETRIES_MAX:
             # if file is under 5 mb perform a simple upload
             fileSize = os.path.getsize(filePath)
-            fileHash = hash_file(filePath)
+            fileHash = mods.hash_file(filePath)
             if fileSize <= (5 * 1024 * 1024):
                 f = upload_drive_file_simple(service, filePath, parentId)
             else:
@@ -563,7 +565,7 @@ def upload_new_local_files(service):
                             parent = create_drive_folder_tree(service, parentFolder)
                             f.properties['parents'] = parent.id
                         #file = upload_drive_file(service, f.localPath, f.properties['parents'][0])
-                        change = Change('created', f.localPath, None, 'file')
+                        change = filewatcher.Change('created', f.localPath, None, 'file')
                         cfg.LOCAL_QUEUE.put(change)
                 else:
                     logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
@@ -617,7 +619,7 @@ def update_drive_files(service):
                         #    parent = create_drive_folder_tree(service, parentFolder)
                         #    f.properties['parents'] = parent.id
                         #file = update_drive_file(service, f, f.localPath)
-                        change = Change('modified', f.localPath, None, 'file')
+                        change = filewatcher.Change('modified', f.localPath, None, 'file')
                         cfg.LOCAL_QUEUE.put(change)
                 else:
                     logging.warning("skipping file '%s'. path not in local cache directory." % f.localPath)    
@@ -904,6 +906,90 @@ def handle_changed_folder(service, folder: gFolder = None):
         logging.error("error processing Google object change. %s" % str(err))
     return
 
+
+# scans all files in Google drive that aren't in the db.  that's our change set.
+# this only needs to happen during startup.  otherwise, change notifications will do the job
+def get_gdrive_changes(service) -> List:
+    # loop through the pages of files from google drive
+    # return the md5Checksum property, along with name, id, mimeType, version, parents
+    # compare files by id with the db.  look where the md5Checksum != md5 stored in the db
+    # also look for files not in the db
+    # important: if the file in google drive is a later version, it's authoritative
+    # this will be the changes from the side of google drive
+    
+    logging.info("scanning google drive files, looking for files and folders that have changed.")
+    differences = []
+    try:
+        gServiceFiles = service.files()
+        params = { "q": "'me' in owners",
+                    "pageSize": cfg.PAGE_SIZE, 
+                    "fields": "nextPageToken," + "files(id, name, mimeType, version, md5Checksum, parents, ownedByMe)"
+        }
+        request = gServiceFiles.list(**params)
+
+        while (request is not None):
+            files_page = request.execute()
+            fs = files_page.get('files', [])
+            for f in fs:
+                dbFile = None
+                rows = cfg.DATABASE.fetch_gObject(f['id'])
+                if len(rows) > 0:
+                    dbFile = rows[0]
+                if f['mimeType'] == cfg.TYPE_GOOGLE_FOLDER:
+                    googleFolder = gFolder(f)
+                    if dbFile is not None and 'version' in dbFile.properties.keys():
+                        # if (dbFile.id != googleFolder.id or \
+                        #            dbFile.name != googleFolder.name) and \
+                        #            dbFile.properties['version'] < googleFolder.properties['version']:
+                        if (int(dbFile.properties['version']) < int(googleFolder.properties['version'])):
+                            # fetch full metadata of the file
+                            get_params = {"fileId": googleFolder.id, "fields": "*"}
+                            get_req = gServiceFiles.get(**get_params)
+                            full_folder = gFolder(get_req.execute())
+                            full_folder.localPath = get_full_folder_path(service, full_folder)
+                            #differences.append(full_folder)
+                            cfg.REMOTE_QUEUE.put(full_folder)
+                    else:
+                        get_params = {"fileId": googleFolder.id, "fields": "*"}
+                        get_req = gServiceFiles.get(**get_params)
+                        full_folder = gFolder(get_req.execute())
+                        #differences.append(full_folder)
+                        cfg.REMOTE_QUEUE.put(full_folder)
+                    
+                else:
+                    googleFile = gFile(f)
+                    if dbFile is not None and 'version' in dbFile.properties.keys():
+                        #if (dbFile.md5 != googleFile.properties['md5Checksum'] or \
+                        #    dbFile.mimeType != googleFile.mimeType) and \
+                        #    dbFile.properties['version'] < googleFile.properties['version']:
+                        if (int(dbFile.properties['version']) < int(googleFile.properties['version'])):
+                                # fetch full metadata of the file
+                                get_params = {"fileId": googleFile.id, "fields": "*"}
+                                get_req = gServiceFiles.get(**get_params)
+                                full_file = gFile(get_req.execute())
+                                #differences.append(full_file)
+                                cfg.REMOTE_QUEUE.put(full_file)
+                    else:
+                        if cfg.TYPE_GOOGLE_APPS not in googleFile.mimeType:
+                            get_params = {"fileId": googleFile.id, "fields": "*"}
+                            get_req = gServiceFiles.get(**get_params)
+                            full_file = gFile(get_req.execute())
+                            #differences.append(full_file)
+                            cfg.REMOTE_QUEUE.put(full_file)
+            request = gServiceFiles.list_next(request, files_page)
+    except HttpError as err:
+        #exc_type, exc_obj, exc_tb = sys.exc_info()
+        #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        #logging.error(exc_type, fname, exc_tb.tb_lineno)
+        logging.error("error scanning google drive files. %s" % str(err))
+        print(err)
+    except Exception as err:
+        #exc_type, exc_obj, exc_tb = sys.exc_info()
+        #fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
+        #logging.error(exc_type, fname, exc_tb.tb_lineno)
+        logging.error("error scanning google drive files. %s" % str(err))
+        print(err)
+    return differences
 
 
 
