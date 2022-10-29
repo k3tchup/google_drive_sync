@@ -581,9 +581,10 @@ class sqlite_store:
             # increment the version of the file
             update_sql = "UPDATE gObjects \
                             SET properties = json_patch(properties, \
-                                '{\"version\":' || (json_extract(properties, '$.version')+1) || '}') \
-                            WHERE id IN ( \
-                            SELECT deleted_id FROM local_deleted);"
+                                '{" + '"version"' + ":' || (json_extract(properties, '$.version')+1) || '}') \
+                            WHERE gObjects.id IN ( \
+                                SELECT deleted_id FROM local_deleted) \
+                            AND json_extract(properties, '$.version') > 0;"
             self.cursor.execute(update_sql)
             # commit the transaction if successful
             self.conn.commit()          
