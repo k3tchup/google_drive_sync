@@ -174,7 +174,10 @@ class Watcher:
             parentFolder = os.path.dirname(filePath)
             c, db_parentFolders = cfg.DATABASE.fetch_gObjectSet(searchField = "local_path", \
                                             searchCriteria=parentFolder)
-            db_parentFolder = self.get_latest_modified_file(db_parentFolders)
+            if len(db_parentFolders) > 0:
+                db_parentFolder = self.get_latest_modified_file(db_parentFolders)
+            else:
+                db_parentFolder = None
             parent_id = None
             if db_parentFolder is not None:
                 parent_id = [db_parentFolder.id]

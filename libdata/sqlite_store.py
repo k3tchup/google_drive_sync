@@ -1,11 +1,13 @@
 
+from gettext import find
 import sqlite3
 from sqlite3 import SQLITE_PRAGMA, Error
 import logging
-from typing import List
+from typing import List, final
 import json
 import sys
 import os
+import threading
 import datetime
 
 
@@ -19,6 +21,7 @@ class sqlite_store:
     def __init__(self):
         self.conn = None
         self.cursor = None
+        self.lock = threading.Lock()
         return
 
     def __create_schema(self):
@@ -131,6 +134,7 @@ class sqlite_store:
         logging.debug("fetching database object with id %s" % id)
         objects = []
         try:
+            self.lock.acquire(True)
             fetchObject_sql = "SELECT id, name, mime_type, properties, md5, local_path FROM gObjects WHERE id = ?;"
             sqlParams = (id, )
             self.cursor.execute(fetchObject_sql, sqlParams)
@@ -151,6 +155,8 @@ class sqlite_store:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
         except Exception as e:
             logging.error("Unable to fetch object id %s. %s" % (id, str(e)))
+        finally:
+            self.lock.release()
 
         return objects
 
@@ -534,6 +540,7 @@ class sqlite_store:
 
     def update_parents(self, id:str, parents: List[str]):
         try:
+            self.lock.acquire(True)
             deleteParents_sql = "DELETE FROM relationships WHERE child_id = ?;"
             sqlParams = (id, )
             self.cursor.execute(deleteParents_sql, sqlParams)
@@ -545,6 +552,8 @@ class sqlite_store:
             logging.error("Unable to update parents for object id %s. %s" % (id, str(e)))
         except Exception as e:
             logging.error("Unable to update parents for object id %s. %s" % (id, str(e))) 
+        finally:
+            self.lock.release()
 
     def identify_local_deleted(self):
         try:
