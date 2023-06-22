@@ -1,6 +1,6 @@
 google_api_python_client==2.62.0
 google_auth_httplib2==0.1.0
 google_auth_oauthlib==0.5.3
-httplib2==0.19.0
+httplib2==0.22.0
 protobuf==4.21.6
 watchdog==2.1.9
